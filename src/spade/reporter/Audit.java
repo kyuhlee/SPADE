@@ -158,12 +158,7 @@ public class Audit extends AbstractReporter {
 	
 	/********************** NETFILTER - START *************************/
 	
-	private final String[] iptablesRules = {
-			"OUTPUT -p tcp -m state --state NEW -j AUDIT --type accept",
-			"INPUT -p tcp -m state --state NEW -j AUDIT --type accept",
-			"OUTPUT -p udp -m state --state NEW -j AUDIT --type accept",
-			"INPUT -p udp -m state --state NEW -j AUDIT --type accept"
-			};
+	private List<String> iptablesRules = null;
 	
 	private List<Artifact> networkArtifactsFromSyscalls = new ArrayList<Artifact>();
 	private List<Artifact> networkArtifactsFromNetfilter = new ArrayList<Artifact>();
@@ -928,12 +923,18 @@ public class Audit extends AbstractReporter {
 			
 			if(isLiveAudit){
 				if(NETFILTER_HANDLING){
-					if(!setIptablesRules(iptablesRules)){
+					this.iptablesRules = buildIptablesRules();
+					if(this.iptablesRules == null){
+						logger.log(Level.SEVERE, "Failed to build iptables rules");
 						return false;
+					}else{
+						if(!setIptablesRules(this.iptablesRules)){
+							return false;
+						}
 					}
 				}
 				if(!setAuditControlRules(rulesType, spadeAuditBridgeBinaryName)){
-					removeIptablesRules(iptablesRules); // remove iptables rules too before exiting
+					removeIptablesRules(this.iptablesRules); // remove iptables rules too before exiting
 					// call doCleanup instead of manually doing this. TODO
 					return false;
 				}
@@ -1109,8 +1110,35 @@ public class Audit extends AbstractReporter {
 			return null;
 		}
 	}
+	
+	private List<String> buildIptablesRules(){
+		String ownUid = getOwnUid(); 
+		if(ownUid == null){
+			return null;
+		}else{
+			String tcpInput = "INPUT -p tcp -m state --state NEW -j AUDIT --type accept",
+					tcpOutput = "OUTPUT -p tcp -m state --state NEW -j AUDIT --type accept",
+					udpInput = "INPUT -p udp -m state --state NEW -j AUDIT --type accept",
+					udpOutput = "OUTPUT -p udp -m state --state NEW -j AUDIT --type accept",
+					uidOutput = "OUTPUT -m owner --uid-owner " + ownUid + " -j ACCEPT",
+					nonNewInput = "INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT",
+					nonNewOutput = "OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT";
+			
+			// Added in list in reverse order because going to use 'insert'.
+			// Using insert to execute these rules first in case some are added already.
+			List<String> iptablesRules = new ArrayList<String>();
+			iptablesRules.add(tcpInput);
+			iptablesRules.add(tcpOutput);
+			iptablesRules.add(udpInput);
+			iptablesRules.add(udpOutput);
+			iptablesRules.add(uidOutput);
+			iptablesRules.add(nonNewInput);
+			iptablesRules.add(nonNewOutput);
+			return iptablesRules;
+		}
+	}
 		
-	private boolean setIptablesRules(String[] iptablesRules){
+	private boolean setIptablesRules(List<String> iptablesRules){
 		try{
 			for(String iptablesRule : iptablesRules){
 				String executeCommand = "iptables -I " + iptablesRule;
@@ -1128,7 +1156,7 @@ public class Audit extends AbstractReporter {
 		}
 	}
 	
-	private boolean removeIptablesRules(String [] iptablesRules){
+	private boolean removeIptablesRules(List<String> iptablesRules){
 		try{
 			for(String iptablesRule : iptablesRules){
 				String executeCommand = "iptables -D " + iptablesRule;
@@ -5083,8 +5111,7 @@ public class Audit extends AbstractReporter {
 				process.getAnnotation(OPMConstants.AGENT_GID), process.getAnnotation(OPMConstants.AGENT_EGID), 
 				process.getAnnotation(OPMConstants.AGENT_SGID), process.getAnnotation(OPMConstants.AGENT_FSGID), 
 				OPMConstants.SOURCE_BEEP, startTime, unitId, iteration, count, null); // NULL seen time
-	}
-			
+	}		
 }
 
 /**
