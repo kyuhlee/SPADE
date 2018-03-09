@@ -1084,6 +1084,10 @@ void non_UBSI_event(long tid, int sysno, bool succ, char *buf)
 						proc_group_end(ut);
 				} else {
 						proc_end(ut);
+						if(sysno == 59){ // execve
+								set_thread_time(buf, &thread_create_time[tid]);
+								// updated start time to the time when execve happened. Done to reflect what happens in Audit reporter.
+						}
 				}
 		}
 }
