@@ -1537,6 +1537,8 @@ public class Audit extends AbstractReporter {
 		String eventId = eventData.get(AuditEventReader.EVENT_ID);
 		try {
 
+			processManager.processSeenInUnsupportedSyscall(eventData); // Always set first because that is what is done in spadeAuditBridge and it is updated if syscall handled.
+			
 			int syscallNum = CommonFunctions.parseInt(eventData.get(AuditEventReader.SYSCALL), -1);
 
 			int arch = -1;
