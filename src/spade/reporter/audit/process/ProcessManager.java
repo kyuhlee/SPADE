@@ -159,7 +159,7 @@ public abstract class ProcessManager extends ProcessStateManager{
 								return t.pid + ":" + t.time;
 							}
 						}
-					});
+					}, true, false);
 		}
 	}
 	
@@ -376,12 +376,12 @@ public abstract class ProcessManager extends ProcessStateManager{
 	/**
 	 * Clears all state for every process. ALL.
 	 */
-	public void daemonStart(){
-		super.clearAll();
-		clearAll();
-		activeProcesses.clear();
-		processUnitStates.clear();
-	}
+//	public void daemonStart(){
+//		super.clearAll();
+//		clearAll();
+//		activeProcesses.clear();
+//		// processUnitStates.clear(); TODO
+//	}
 	
 	/**
 	 * Returns either null (if unit==false) or 0 (if unit==true)

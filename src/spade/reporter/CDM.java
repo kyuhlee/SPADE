@@ -173,7 +173,7 @@ public class CDM extends AbstractReporter{
 						public String getHash(String t) {
 							return t;
 						}
-					});
+					}, true, false);
 		}catch(Exception e){
 			logger.log(Level.SEVERE, "Failed to create external map", e);
 			return null;

@@ -58,6 +58,16 @@ public interface ExternalStore<V extends Serializable>{
 	 */
 	public void clear() throws Exception;
 	/**
+	 * A function to reopen the store (if supported)
+	 * @throws Exception Any underlying implementation specific exception
+	 */
+	public void reopen() throws Exception;
+	/**
+	 * A function to check if the store is closed or not
+	 * @return true/false
+	 */
+	public boolean isClosed();
+	/**
 	 * A function to close the store
 	 * @throws Exception Any implementation dependent exception
 	 */
@@ -87,6 +97,8 @@ public interface ExternalStore<V extends Serializable>{
 			return new LevelDBStore<X>(dbDirPath, dbName);
 		}else if(BerkeleyDB.class.equals(storeClass)){
 			return new BerkeleyDB<X>(dbDirPath, dbName);
+		}else if(InMemoryStore.class.equals(storeClass)){
+			return new InMemoryStore<X>(dbDirPath, dbName);
 		}else{
 			throw new Exception("Unexpected store class: " + storeClass);
 		}

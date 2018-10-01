@@ -191,14 +191,16 @@ public class CommonFunctions {
 
     public static void closePrintSizeAndDeleteExternalMemoryMap(String id, ExternalMemoryMap<?, ?> map){
     	if(map != null){
-    		try{
-    			map.close();
-    		}catch(Exception e){
-    			logger.log(Level.WARNING, id + ": Failed to close external map", e);
+    		if(!map.isExternalStoreClosed()){
+	    		try{
+	    			map.close(false);
+	    		}catch(Exception e){
+	    			logger.log(Level.WARNING, id + ": Failed to close external map", e);
+	    		}
     		}
     		BigInteger sizeBytes = null;
     		try{
-    			sizeBytes = map.getSizeOfPersistedDataInBytes();
+    			sizeBytes = map.getSizeOfExternalStore();
     			if(sizeBytes == null){
     				logger.log(Level.INFO, id + ": Failed to get size of external map");
     			}
@@ -210,7 +212,7 @@ public class CommonFunctions {
     			logger.log(Level.INFO, id + ": Size of the external map on disk: {0}", displaySize);
     		}
     		try{
-    			map.delete();
+    			map.deleteExternalStore();
     		}catch(Exception e){
     			logger.log(Level.WARNING, id + ": Failed to delete external map", e);
     		}
@@ -328,7 +330,7 @@ public class CommonFunctions {
     public static <X, Y extends Serializable> ExternalMemoryMap<X, Y> createExternalMemoryMapInstance(String id,
     		String cacheSizeValue, String bloomfilterFalsePositiveProbValue, String bloomfilterExpectedElementsCountValue,
     		String parentDBDirPathValue, String dbDirAndNameValue, String reportingIntervalSecondsValue,
-    		String storeClassNameValue, Hasher<X> hasher) throws Exception{
+    		String storeClassNameValue, Hasher<X> hasher, boolean appendCurrentMillisToDir, boolean deleteDirIfExists) throws Exception{
 
     	String exceptionPrefix = id + ": ExternalMemoryMap creation: ";
 
@@ -351,12 +353,22 @@ public class CommonFunctions {
     				". Failed to create dbs parent directory: " + parentDBDirPathValue, e);
     	}
 
-    	dbDirAndNameValue += "_" + System.currentTimeMillis();
+    	if(appendCurrentMillisToDir){
+    		dbDirAndNameValue += "_" + System.currentTimeMillis();
+    	}
     	String dbPath = parentDBDirPathValue + File.separator + dbDirAndNameValue;
 
     	try{
     		if(FileUtility.doesPathExist(dbPath)){
-    			throw new Exception("DB path already in use");
+    			if(deleteDirIfExists){
+    				try{
+    					FileUtility.deleteDirectory(dbPath);
+    				}catch(Throwable t){
+    					throw new Exception(exceptionPrefix + t.getMessage() + ". Failed to delete existing db path: " + dbPath, t);
+    				}
+    			}else{
+    				throw new Exception("DB path already in use");
+    			}
     		}
     	}catch(Exception e){
     		throw new Exception(exceptionPrefix + e.getMessage() + ". Failed to check if db path exists: " + dbPath, e);
@@ -382,8 +394,7 @@ public class CommonFunctions {
     	try{
     		
     		ExternalStore<Y> db = ExternalStore.createInstance(externalStoreClass, dbPath, dbDirAndNameValue);
-    		ExternalMemoryMap<X, Y> map = new ExternalMemoryMap<X, Y>(
-    				id, cacheSize, db, falsePositiveProb, expectedNumberOfElements);
+    		ExternalMemoryMap<X, Y> map = new ExternalMemoryMap<X, Y>(id, cacheSize, db, falsePositiveProb, expectedNumberOfElements);
     		if(reporterInterval != null){
     			reporterInterval *= 1000;
     			map.printStats(reporterInterval);

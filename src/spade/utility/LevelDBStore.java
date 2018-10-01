@@ -33,85 +33,157 @@ import java.math.BigInteger;
 import org.iq80.leveldb.CompressionType;
 import org.iq80.leveldb.DB;
 import org.iq80.leveldb.Options;
-import org.iq80.leveldb.WriteOptions;
 
 public class LevelDBStore<V extends Serializable> implements ExternalStore<V>{
 
 	private final String dbName;
 	private final String dbDirPath;
 	
-	private final DB db;
+	private DB db;
+	
+	private boolean isClosed = false;
 	
 	protected LevelDBStore(String dbDirPath, String dbName) throws Throwable{
 		this.dbDirPath = dbDirPath;
 		this.dbName = dbName;
 		
-		WriteOptions writeOptions = new WriteOptions();
-        writeOptions.sync(false);
-        Options options = new Options();
+        db = factory.open(new File(this.dbDirPath), getDefaultOptions());
+        if(db == null){
+        	throw new Exception("Silently failed to initialize DB");
+        }
+	}
+	
+	private Options getDefaultOptions(){
+		Options options = new Options();
         options.createIfMissing(true);
         options.compressionType(CompressionType.NONE);
-        
-        db = factory.open(new File(this.dbDirPath), options);
+        return options;
+	}
+	
+	private String getDBPrintableString(){
+		return "["+dbName+"("+dbDirPath+")]";
+	}
+	
+	private String getDBClosedErrorMessage(){
+		return "DB "+getDBPrintableString()+" is closed";
 	}
 	
 	@Override
 	public V get(String key) throws Exception{
-		byte[] valueBytes = db.get(key.getBytes());
-        ByteArrayInputStream byteInputStream = new ByteArrayInputStream(valueBytes);
-		ObjectInputStream objectInputStream = new ObjectInputStream(byteInputStream);
-		return (V)objectInputStream.readObject();
+		if(isClosed){
+			throw new Exception(getDBClosedErrorMessage());
+		}else{
+			if(key != null){
+				byte[] valueBytes = db.get(key.getBytes());
+				if(valueBytes != null){
+			        ByteArrayInputStream byteInputStream = new ByteArrayInputStream(valueBytes);
+					ObjectInputStream objectInputStream = new ObjectInputStream(byteInputStream);
+					return (V)objectInputStream.readObject();
+				}else{
+					return null;
+				}
+			}else{
+				return null;
+			}
+		}
 	}
 
 	@Override
 	public void put(String key, V value) throws Exception{
-		ByteArrayOutputStream byteOutputStream = new ByteArrayOutputStream();
-		ObjectOutputStream objectOutputStream = new ObjectOutputStream(byteOutputStream);
-		objectOutputStream.writeObject(value);
-		objectOutputStream.flush();
-		byte[] valueBytes = byteOutputStream.toByteArray(); 
-		
-		db.put(key.getBytes(), valueBytes);
+		if(isClosed){
+			throw new Exception(getDBClosedErrorMessage());
+		}else{
+			if(key != null && value != null){
+				ByteArrayOutputStream byteOutputStream = new ByteArrayOutputStream();
+				ObjectOutputStream objectOutputStream = new ObjectOutputStream(byteOutputStream);
+				objectOutputStream.writeObject(value);
+				objectOutputStream.flush();
+				byte[] valueBytes = byteOutputStream.toByteArray(); 
+				
+				db.put(key.getBytes(), valueBytes);
+			}
+		}
 	}
 
 	@Override
 	public void remove(String key) throws Exception{
-		db.delete(key.getBytes());
+		if(isClosed){
+			throw new Exception(getDBClosedErrorMessage());
+		}else{
+			if(key != null){
+				db.delete(key.getBytes());
+			}
+		}
 	}
 
+	/**
+	 * NOT IMPLEMENTED YET	
+	 */
 	@Override
 	public void clear() throws Exception{
-		// TODO
+		//no current implementation
+	}
+	
+	@Override
+	public void reopen() throws Exception{
+		if(!isClosed){
+			throw new Exception("DB "+getDBPrintableString()+" is already open");
+		}else{
+			db = factory.open(new File(this.dbDirPath), getDefaultOptions());
+			if(db == null){
+	        	throw new Exception("Silently failed to reopen DB");
+	        }
+			isClosed = false;
+		}
 	}
 
 	@Override
+	public boolean isClosed(){
+		return isClosed;
+	}
+	
+	@Override
 	public void close() throws Exception{
-		db.close();
+		if(isClosed){
+			throw new Exception(getDBClosedErrorMessage());
+		}else{
+			isClosed = true;
+			if(db != null){
+				db.close();
+				db = null;
+			}
+		}
 	}
 
 	@Override
 	public void delete() throws Exception{
-		try{
-			if(FileUtility.doesPathExist(dbDirPath)){
-				if(!FileUtility.deleteDirectory(dbDirPath)){
-					throw new Exception();
+		if(dbDirPath != null){
+			try{
+				if(FileUtility.doesPathExist(dbDirPath)){
+					if(!FileUtility.deleteDirectory(dbDirPath)){
+						throw new Exception();
+					}
 				}
+			}catch(Exception e){
+				throw new Exception(e.getMessage() + ". Path deletion failed: " + dbDirPath, e);
 			}
-		}catch(Exception e){
-			throw new Exception(e.getMessage() + ". Path deletion failed: " + dbDirPath, e);
 		}
 	}
 	
 	@Override
 	public BigInteger sizeInBytesOfPersistedData() throws Exception{
-		try{
-			if(FileUtility.doesPathExist(dbDirPath)){
-				return FileUtility.getSizeInBytes(dbDirPath);
-			}else{
-				throw new Exception("Does not exist");
+		if(dbDirPath != null){
+			try{
+				if(FileUtility.doesPathExist(dbDirPath)){
+					return FileUtility.getSizeInBytes(dbDirPath);
+				}else{
+					throw new Exception("Does not exist");
+				}
+			}catch(Exception e){
+				throw new Exception(e.getMessage() + ". Failed to get size for path: " + dbDirPath, e);
 			}
-		}catch(Exception e){
-			throw new Exception(e.getMessage() + ". Failed to get size for path: " + dbDirPath, e);
+		}else{
+			return BigInteger.ZERO;
 		}
 	}
 	

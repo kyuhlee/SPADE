@@ -20,8 +20,14 @@
 package spade.reporter.audit.artifact;
 
 import java.math.BigInteger;
+import java.util.AbstractMap.SimpleEntry;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -60,7 +66,8 @@ public class ArtifactManager{
 			CONFIG_KEY_TRANSIENT_BF_FP_PROB = "transientbffpp",
 			CONFIG_KEY_TRANSIENT_BF_EXPECTED_ELEMENTS = "transientbfexpectedelements",
 			CONFIG_KEY_TRANSIENT_REPORTING_INTERVAL_SECONDS = "transientreportinginterval",
-			CONFIG_KEY_TRANSIENT_STORE_CLASS_NAME = "transientdbstoreclassname";
+			CONFIG_KEY_TRANSIENT_STORE_CLASS_NAME = "transientdbstoreclassname",
+			CONFIG_KEY_MAX_OPEN_RETRY_COUNT = "maxopenretries";
 	
 	private static final String[] mandatoryConfigKeys = {CONFIG_KEY_PARENT_DIR, //CONFIG_KEY_PERSISTENT_SUB_DIR, 
 			CONFIG_KEY_PERSISTENT_DB_NAME, CONFIG_KEY_PERSISTENT_CACHE_SIZE, CONFIG_KEY_PERSISTENT_BF_FP_PROB,
@@ -69,7 +76,7 @@ public class ArtifactManager{
 			//CONFIG_KEY_TRANSIENT_SUB_DIR_PREFIX, 
 			CONFIG_KEY_TRANSIENT_DB_NAME_PREFIX, CONFIG_KEY_TRANSIENT_CACHE_SIZE, CONFIG_KEY_TRANSIENT_BF_FP_PROB,
 			CONFIG_KEY_TRANSIENT_BF_EXPECTED_ELEMENTS, CONFIG_KEY_TRANSIENT_REPORTING_INTERVAL_SECONDS,
-			CONFIG_KEY_TRANSIENT_STORE_CLASS_NAME};
+			CONFIG_KEY_TRANSIENT_STORE_CLASS_NAME, CONFIG_KEY_MAX_OPEN_RETRY_COUNT};
 	
 	private String configParentDir, 
 	
@@ -82,6 +89,9 @@ public class ArtifactManager{
 			configTransientDbNamePrefix, configTransientCacheSize, 
 			configTransientBloomfilterFalsePositiveProb, configTransientBloomfilterExpectedElements,
 			configTransientReportingIntervalSeconds, configTransientStoreClassName;
+	private int maxRetryCount;
+	
+	private long IO_SLEEP_WAIT_MS = 50;
 	
 	private final Hasher<ArtifactIdentifier> artifactIdentifierHasher = new Hasher<ArtifactIdentifier>(){
 		@Override
@@ -116,8 +126,12 @@ public class ArtifactManager{
 	private final String persistentArtifactsMapId = "Audit[PersistentArtifactsMap]";
 	private ExternalMemoryMap<ArtifactIdentifier, ArtifactState> persistentArtifactsMap;
 	
-	private Map<String, ExternalMemoryMap<ArtifactIdentifier, ArtifactState>> transientArtifactsMaps = 
+	// Group id -> external memory map
+	private Map<String, ExternalMemoryMap<ArtifactIdentifier, ArtifactState>> closedTransientArtifactsMaps = 
 			new HashMap<String, ExternalMemoryMap<ArtifactIdentifier, ArtifactState>>();
+	// Group id -> (external memory map, last accessed time)
+	private Map<String, SimpleEntry<ExternalMemoryMap<ArtifactIdentifier, ArtifactState>, Long>> openTransientArtifactsMaps = 
+			new HashMap<String, SimpleEntry<ExternalMemoryMap<ArtifactIdentifier, ArtifactState>, Long>>();
 	
 	public ArtifactManager(Audit reporter, Globals globals) throws Throwable{
 		if(reporter == null){
@@ -153,7 +167,7 @@ public class ArtifactManager{
 				configPersistentCacheSize, configPersistentBloomfilterFalsePositiveProb, 
 				configPersistentBloomfilterExpectedElements, dirPath,
 				configPersistentDbName, configPersistentReportingIntervalSeconds, configPersistentStoreClassName,
-				artifactIdentifierHasher
+				artifactIdentifierHasher, true, false
 		);
 	}
 	
@@ -165,7 +179,7 @@ public class ArtifactManager{
 				configTransientCacheSize, configTransientBloomfilterFalsePositiveProb, 
 				configTransientBloomfilterExpectedElements, dirPath,
 				dbName, configTransientReportingIntervalSeconds, configTransientStoreClassName,
-				artifactIdentifierHasher
+				artifactIdentifierHasher, false, true
 		);
 	}
 	
@@ -175,6 +189,17 @@ public class ArtifactManager{
 		for(String configKey : mandatoryConfigKeys){
 			if(configMap.get(configKey) == null){
 				throw new Exception("Missing key '"+configKey+"' in default config file");
+			}
+		}
+		
+		Integer maxRetryCountInt = CommonFunctions.parseInt(configMap.get(CONFIG_KEY_MAX_OPEN_RETRY_COUNT), null);
+		if(maxRetryCountInt == null){
+			throw new Exception("Invalid value for key '"+CONFIG_KEY_MAX_OPEN_RETRY_COUNT+"' in default config file");
+		}else{
+			if(maxRetryCountInt < 0){
+				throw new Exception("Only non-negative values allowed for key '"+CONFIG_KEY_MAX_OPEN_RETRY_COUNT+"' in default config file");
+			}else{
+				maxRetryCount = maxRetryCountInt;
 			}
 		}
 		
@@ -273,24 +298,223 @@ public class ArtifactManager{
 		return artifactConfigs.get(identifier.getClass()).canBePermissioned;
 	}
 	
+	/**
+	 * If identifier is subclass of TransientArtifactIdentifer then:
+	 * 		
+	 * 		Get group id from the identifier
+	 * 		If opened map not found for the group id:
+	 * 			Find the map for group id in the closed maps map
+	 * 			Try to open the map for this group id
+	 * 			Get the opened map for this group id. If null then return the persistent one. else the opened one.
+	 * 		else:
+	 * 			Updated the access time for the group id in the opened maps map
+	 * 			return the found opened map
+	 * 		
+	 * else:
+	 * 		return the persistent artifacts map
+	 * 
+	 * @param identifier artifact identifier
+	 * @return
+	 */
 	private ExternalMemoryMap<ArtifactIdentifier, ArtifactState> getResolvedArtifactMap(ArtifactIdentifier identifier){
 		if(identifier instanceof TransientArtifactIdentifier){
 			TransientArtifactIdentifier transientIdentifier = (TransientArtifactIdentifier)(identifier);
 			String processId = transientIdentifier.getGroupId();
-			ExternalMemoryMap<ArtifactIdentifier, ArtifactState> transientMap = transientArtifactsMaps.get(processId);
-			if(transientMap == null){
-				try{
-					transientMap = initTransientArtifactsMap(processId);
-					transientArtifactsMaps.put(processId, transientMap);
-				}catch(Throwable t){
-					logger.log(Level.SEVERE, "Failed to init transient map for processId: " + processId + 
-							". Using the persistent one. Garbage collection will fail for this process.", t);
-					return persistentArtifactsMap; // As a backup
+			SimpleEntry<ExternalMemoryMap<ArtifactIdentifier, ArtifactState>, Long> openTransientMapEntry = 
+					openTransientArtifactsMaps.get(processId);
+			
+			if(openTransientMapEntry == null){
+				// Check if it exists in closed
+				ExternalMemoryMap<ArtifactIdentifier, ArtifactState> closedTransientMap = 
+						closedTransientArtifactsMaps.get(processId);
+				
+				openTransientMap(processId, closedTransientMap);
+				
+				openTransientMapEntry = openTransientArtifactsMaps.get(processId);
+				if(openTransientMapEntry == null || openTransientMapEntry.getKey() == null){
+					logger.log(Level.SEVERE, "Using persistent artifacts map. Garbarge collection will fail. "
+							+ "Failed to open transient map for processId: " + processId);
+					return persistentArtifactsMap;
+				}else{
+					return openTransientMapEntry.getKey();
 				}
+			}else{
+				// Was in open and is open
+				// If exists in open then update the access time and return the map.
+				long newAccessTime = System.nanoTime();
+				openTransientMapEntry.setValue(newAccessTime);
+				return openTransientMapEntry.getKey();
 			}
-			return transientMap;
 		}else{
 			return persistentArtifactsMap;
+		}
+	}
+	
+	/**
+	 * while not opened the required one:
+	 * 		if closedtransientmap is null then try to create a new map
+	 * 		if closedtransientmap is NOT null then try to open the existing (but closed) map. If reopened then remove from closed.
+	 * 		if no exception then add the opened one to the open maps map
+	 * 		if exception then check retries
+	 * 		if retries exhausted stop trying to close existing one in order to open the new one
+	 * 		if retries NOT exhausted then find the least recently used open one and try to close it
+	 * 		try the above from the top again
+	 * 
+	 * @param processId
+	 * @param closedTransientMap
+	 */
+	private void openTransientMap(String processId, ExternalMemoryMap<ArtifactIdentifier, ArtifactState> closedTransientMap){
+		int retryCount = 0;
+		
+		List<Map.Entry<String, SimpleEntry<ExternalMemoryMap<ArtifactIdentifier, ArtifactState>, Long>>> list = null;
+		
+		ExternalMemoryMap<ArtifactIdentifier, ArtifactState> transientMap = null;
+		while(transientMap == null){
+			try{
+				if(closedTransientMap == null){
+					transientMap = initTransientArtifactsMap(processId);
+				}else{
+					closedTransientMap.reopenExternalStore();
+					transientMap = closedTransientMap;
+					closedTransientArtifactsMaps.remove(processId);
+				}
+				// If successfully opened i.e. no exception
+				if(!transientMap.isExternalStoreClosed()){
+					openTransientArtifactsMaps.put(processId, 
+							new SimpleEntry<ExternalMemoryMap<ArtifactIdentifier,ArtifactState>, Long>(
+									transientMap, System.nanoTime()));
+				}else{
+					throw new Exception("Silently failed to open external store for processId: " + processId);
+				}
+			}catch(Throwable t){
+				// org.fusesource.leveldbjni.internal.NativeDB$DBException
+				// com.sleepycat.je.EnvironmentFailureException
+				// Failed to open
+				if(retryCount > maxRetryCount){
+					logger.log(Level.SEVERE, 
+							retryCount + " out of " + maxRetryCount + " retries exhausted to open transient artifacts map for "
+									+ "processId: " + processId, t);
+					break;
+				}else{
+					// retry. continue.
+					// close the least recently accessed on
+					if(list == null){
+						list = new ArrayList<>(openTransientArtifactsMaps.entrySet());
+						Collections.sort(list, transientListComparator);
+					}
+					closeLeastRecentlyAccessedTransientMap(processId, list);
+					try{ Thread.sleep(IO_SLEEP_WAIT_MS); }catch(Throwable thrown){}
+				}
+			}
+			retryCount++;
+		}
+	}
+	
+	private Comparator<Map.Entry<String, SimpleEntry<ExternalMemoryMap<ArtifactIdentifier, ArtifactState>, Long>>> 
+			transientListComparator 
+			= 
+			new Comparator<Map.Entry<String, SimpleEntry<ExternalMemoryMap<ArtifactIdentifier, ArtifactState>, Long>>>(){
+		@Override
+		public int compare(
+				Entry<String, SimpleEntry<ExternalMemoryMap<ArtifactIdentifier, ArtifactState>, Long>> o1,
+				Entry<String, SimpleEntry<ExternalMemoryMap<ArtifactIdentifier, ArtifactState>, Long>> o2){
+			if(o1 == null && o2 == null){
+				return 0;
+			}else if(o1 == null && o2 != null){
+				return -1;
+			}else if(o1 != null && o2 == null){
+				return 1;
+			}else{ // both non-null
+				SimpleEntry<ExternalMemoryMap<ArtifactIdentifier, ArtifactState>, Long> v1 = o1.getValue();
+				SimpleEntry<ExternalMemoryMap<ArtifactIdentifier, ArtifactState>, Long> v2 = o2.getValue();
+				if(v1 == null && v2 == null){
+					return 0;
+				}else if(v1 == null && v2 != null){
+					return -1;
+				}else if(v1 != null && v2 == null){
+					return 1;
+				}else{ // both non-null
+					Long l1 = v1.getValue();
+					Long l2 = v2.getValue();
+					if(l1 == null && l2 == null){
+						return 0;
+					}else if(l1 == null && l2 != null){
+						return -1;
+					}else if(l1 != null && l2 == null){
+						return 1;
+					}else{ // both non-null
+						if(l1 < l2){
+							return -1;
+						}else if(l1 > l2){
+							return 1;
+						}else{
+							return 0;
+						}
+					}
+				}
+			}
+		}
+	};
+	
+	/**
+	 * The list of open maps is sorted ascending order on time i.e. the first one is the least recently used
+	 * Keep reading the sorted list until a map found where the time is smallest, the value is non-null and value's group id is different than the one passed in argument
+	 * If found then remove it from the sorted list in case we need to remove more later
+	 * If a valid entry found then close (with flush = true), remove from open, add to close
+	 * 
+	 * @param currentProcessId
+	 * @param sortedOpenList
+	 */
+	private void closeLeastRecentlyAccessedTransientMap(String currentProcessId,
+			List<Map.Entry<String, SimpleEntry<ExternalMemoryMap<ArtifactIdentifier, ArtifactState>, Long>>> sortedOpenList){
+		int index = 0;
+		Map.Entry<String, SimpleEntry<ExternalMemoryMap<ArtifactIdentifier, ArtifactState>, Long>> entry = null;
+		// Iterate over the sorted list until first (least recently used) map found or nothing in list left
+		while(entry == null && index < sortedOpenList.size()){
+			Map.Entry<String, SimpleEntry<ExternalMemoryMap<ArtifactIdentifier, ArtifactState>, Long>> entryTmp = 
+					sortedOpenList.get(index);
+			if(entryTmp == null){
+				index++;
+				continue;
+			}else{
+				// If entry has the same id as currentProcessId then DON'T close that because we want that opened.
+				if(entryTmp.getKey() != null && entryTmp.getKey().equals(currentProcessId)){
+					index++;
+					continue;
+				}else{
+					entry = entryTmp;
+					sortedOpenList.remove(index);
+					break;
+				}
+			}
+		}
+		
+		if(entry == null){
+			logger.log(Level.SEVERE, "Nothing closed because no valid entry found");
+			// error
+		}else{
+			String processId = entry.getKey();
+			if(processId != null){
+				SimpleEntry<ExternalMemoryMap<ArtifactIdentifier, ArtifactState>, Long> entrySimple = entry.getValue();
+				if(entrySimple != null){
+					ExternalMemoryMap<ArtifactIdentifier, ArtifactState> openMap = entrySimple.getKey();
+					if(openMap != null){
+						try{
+							openMap.close(true);
+							openTransientArtifactsMaps.remove(processId);
+							closedTransientArtifactsMaps.put(processId, openMap);
+						}catch(Throwable t){
+							logger.log(Level.SEVERE, "Failed to close map with processId: " + processId, t);
+						}
+					}else{
+						logger.log(Level.SEVERE, "Nothing closed because NULL map for processId: " + processId);
+					}
+				}else{
+					logger.log(Level.SEVERE, "Nothing closed because NULL entry for processId: " + processId);
+				}
+			}else{
+				logger.log(Level.SEVERE, "Nothing closed because NULL processId for entry: " + entry);
+			}
 		}
 	}
 
@@ -452,10 +676,22 @@ public class ArtifactManager{
 	}
 	
 	public void doCleanUpForPid(String processId){
-		if(transientArtifactsMaps != null){
-			ExternalMemoryMap<ArtifactIdentifier, ArtifactState> map = transientArtifactsMaps.remove(processId);
+		String mapId = getTransientArtifactsMapId(processId);
+		
+		if(openTransientArtifactsMaps != null){
+			SimpleEntry<ExternalMemoryMap<ArtifactIdentifier, ArtifactState>, Long> entry = 
+					openTransientArtifactsMaps.remove(processId);
+			if(entry != null){
+				ExternalMemoryMap<ArtifactIdentifier, ArtifactState> map = entry.getKey();
+				if(map != null){
+					CommonFunctions.closePrintSizeAndDeleteExternalMemoryMap(mapId, map);
+				}
+			}
+		}
+		
+		if(closedTransientArtifactsMaps != null){
+			ExternalMemoryMap<ArtifactIdentifier, ArtifactState> map = closedTransientArtifactsMaps.remove(processId);
 			if(map != null){
-				String mapId = getTransientArtifactsMapId(processId);
 				CommonFunctions.closePrintSizeAndDeleteExternalMemoryMap(mapId, map);
 			}
 		}
@@ -466,8 +702,21 @@ public class ArtifactManager{
 			CommonFunctions.closePrintSizeAndDeleteExternalMemoryMap(persistentArtifactsMapId, persistentArtifactsMap);
 			persistentArtifactsMap = null;
 		}
-		if(transientArtifactsMaps != null){
-			for(Map.Entry<String, ExternalMemoryMap<ArtifactIdentifier, ArtifactState>> entry : transientArtifactsMaps.entrySet()){
+		if(openTransientArtifactsMaps != null){
+			for(Map.Entry<String, SimpleEntry<ExternalMemoryMap<ArtifactIdentifier, ArtifactState>, Long>> entry : 
+					openTransientArtifactsMaps.entrySet()){
+				if(entry != null){
+					String processId = entry.getKey();
+					String transientMapId = getTransientArtifactsMapId(processId);
+					ExternalMemoryMap<ArtifactIdentifier, ArtifactState> transientMap = entry.getValue().getKey();
+					CommonFunctions.closePrintSizeAndDeleteExternalMemoryMap(transientMapId, transientMap);
+				}
+			}
+			openTransientArtifactsMaps.clear();
+		}
+		if(closedTransientArtifactsMaps != null){
+			for(Map.Entry<String, ExternalMemoryMap<ArtifactIdentifier, ArtifactState>> entry : 
+				closedTransientArtifactsMaps.entrySet()){
 				if(entry != null){
 					String processId = entry.getKey();
 					String transientMapId = getTransientArtifactsMapId(processId);
@@ -475,7 +724,7 @@ public class ArtifactManager{
 					CommonFunctions.closePrintSizeAndDeleteExternalMemoryMap(transientMapId, transientMap);
 				}
 			}
-			transientArtifactsMaps.clear();
+			closedTransientArtifactsMaps.clear();
 		}
 	}
 }
