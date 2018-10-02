@@ -337,12 +337,66 @@ public abstract class ProcessManager extends ProcessStateManager{
 	 * @param pid process id
 	 * @return time value or null if not found
 	 */
-	public String getStartOrSeenTimeForPid(String pid){
-		ProcessKey key = activeProcesses.get(pid);
-		if(key != null){
-			return key.time;
+	private String getThreadGroupIdStartOrSeenTime(String pid){
+		String threadGroupId = getThreadGroupId(pid);
+		if(threadGroupId != null){
+			ProcessUnitState threadGroupState = getProcessUnitState(threadGroupId);
+			if(threadGroupState != null){
+				ProcessIdentifier processIdentifier = threadGroupState.getProcess();
+				if(processIdentifier != null){
+					if(processIdentifier.startTime != null){
+						return processIdentifier.startTime;
+					}else{
+						return processIdentifier.seenTime;
+					}
+				}else{
+					return null;
+				}
+			}else{
+				return null;
+			}
 		}else{
 			return null;
+		}
+	}
+	
+	/**
+	 * Gets the thread group id of the pid as decided at the time of clone call.
+	 * 
+	 * @param pid process id
+	 * @return thread group id
+	 */
+	private String getThreadGroupId(String pid){
+		ProcessUnitState state = getProcessUnitState(pid);
+		if(state != null){
+			return state.getThreadGroupId();
+		}else{
+			return null;
+		}
+	}
+	
+	public String getGroupIdForTransientArtifact(String pid){
+		// If pid doesn't have a corresponding group id then return pid because it will be added by the calling syscall
+		String threadGroupId = getThreadGroupId(pid);
+		if(threadGroupId != null){
+			return threadGroupId;
+		}else{
+			// is the unseen process
+			return pid;
+		}
+	}
+	
+	public String getGroupTimeForTransientArtifact(String pid){
+		String threadGroupTime = getThreadGroupIdStartOrSeenTime(pid);
+		if(threadGroupTime != null){
+			return threadGroupTime;
+		}else{
+			ProcessKey existingProcessKey = activeProcesses.get(pid);
+			if(existingProcessKey != null){
+				return existingProcessKey.time;
+			}else{
+				return null;
+			}
 		}
 	}
 		
@@ -703,8 +757,6 @@ public abstract class ProcessManager extends ProcessStateManager{
 		}
 		
 		boolean groupExited = false;
-		String memTgid = getMemoryTgid(pid);
-		String fdTgid = getFdTgid(pid);
 		
 		ProcessKey activeKey = null;
 		ProcessUnitState state = null;
@@ -756,7 +808,7 @@ public abstract class ProcessManager extends ProcessStateManager{
 				if(activeKey != null){
 					processUnitStates.remove(activeKey);
 				}
-				groupExited = true;
+				groupExited = activeProcesses.get(threadGroupId) == null;
 			}else{
 				removeProcessUnitState(pid);
 			}
@@ -765,8 +817,9 @@ public abstract class ProcessManager extends ProcessStateManager{
 		}
 		
 		if(groupExited){
-			artifactManager.doCleanUpForPid(memTgid);
-			artifactManager.doCleanUpForPid(fdTgid);
+			if(threadGroupId != null){
+				artifactManager.doCleanUpForPid(threadGroupId);
+			}
 		}
 		
 		return true;
@@ -985,8 +1038,9 @@ public abstract class ProcessManager extends ProcessStateManager{
 								if(inodefd0.get(inode) == null){
 									inodefd0.put(inode, fdString);
 								}else{
-									String pidTime = getStartOrSeenTimeForPid(pid);
-									ArtifactIdentifier pipeInfo = new UnnamedPipeIdentifier(pid, pidTime, fdString, inodefd0.get(inode));
+									String threadGroupId = getThreadGroupId(pid);
+									String threadGroupTime = getThreadGroupIdStartOrSeenTime(pid);
+									ArtifactIdentifier pipeInfo = new UnnamedPipeIdentifier(threadGroupId, threadGroupTime, fdString, inodefd0.get(inode));
 									fds.put(fdString, pipeInfo);
 									fds.put(inodefd0.get(inode), pipeInfo);
 									inodefd0.remove(inode);

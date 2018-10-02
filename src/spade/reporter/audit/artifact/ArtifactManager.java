@@ -341,9 +341,10 @@ public class ArtifactManager{
 		return artifactConfigs.get(identifier.getClass()).canBePermissioned;
 	}
 	
-	private void printTransientStats(){
+	private void printTransientStats(boolean force){
 		if(reportingTransientMapsStats){
-			if(System.currentTimeMillis() - lastTransientMapsMapReportedMillis > configTransientMapsMapReportingIntervalMillis){
+			if((System.currentTimeMillis() - lastTransientMapsMapReportedMillis > configTransientMapsMapReportingIntervalMillis) ||
+					force){
 //				intervalCount = intervalCount.add(BigInteger.ONE);
 //				sumUniqueAccessCounts = sumUniqueAccessCounts.add(
 //						new BigInteger(String.valueOf(globalStats.accessedGroupTransientMaps.size())));
@@ -389,8 +390,9 @@ public class ArtifactManager{
 	 * @param identifier artifact identifier
 	 * @return
 	 */
+	
 	private ExternalMemoryMap<ArtifactIdentifier, ArtifactState> getResolvedArtifactMap(ArtifactIdentifier identifier){
-		printTransientStats();
+		printTransientStats(false);
 		if(identifier instanceof TransientArtifactIdentifier){
 			TransientArtifactIdentifier transientIdentifier = (TransientArtifactIdentifier)(identifier);
 			String processId = transientIdentifier.getGroupId();
@@ -693,7 +695,7 @@ public class ArtifactManager{
 	}
 	
 	public void doCleanUpForPid(String processId){
-		if(groupIdToMapContainer != null){
+		if(groupIdToMapContainer != null && processId != null){
 			TransientArtifactMapContainer container = groupIdToMapContainer.remove(processId);
 			if(container != null){
 				container.deleteMap();
@@ -717,6 +719,7 @@ public class ArtifactManager{
 			}
 			groupIdToMapContainer.clear();
 		}
+		printTransientStats(true);
 	}
 	
 	/**
