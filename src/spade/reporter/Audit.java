@@ -1623,6 +1623,8 @@ public class Audit extends AbstractReporter {
 	@Override
 	public boolean shutdown() {
 		
+		logger.log(Level.INFO, "Starting Audit shutdown...");
+		
 		// Send an interrupt to the spadeAuditBridgeProcess
 		
 		sendSignalToPid(spadeAuditBridgeProcessPid, "2");
