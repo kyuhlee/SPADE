@@ -173,7 +173,7 @@ public class CDM extends AbstractReporter{
 						public String getHash(String t) {
 							return t;
 						}
-					}, true, false);
+					}, true, false, true);
 		}catch(Exception e){
 			logger.log(Level.SEVERE, "Failed to create external map", e);
 			return null;
@@ -847,7 +847,7 @@ public class CDM extends AbstractReporter{
 	
 	private synchronized void doCleanup(){
 		if(uuidToVertexMap != null){
-			CommonFunctions.closePrintSizeAndDeleteExternalMemoryMap(uuidMapId, uuidToVertexMap);
+			CommonFunctions.closePrintSizeAndDeleteExternalMemoryMap(uuidMapId, uuidToVertexMap, true);
 			uuidToVertexMap = null;
 		}
 

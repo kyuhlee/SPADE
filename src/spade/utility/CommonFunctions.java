@@ -189,7 +189,8 @@ public class CommonFunctions {
     	return Hex.encodeHexString(String.valueOf(string).getBytes());
     }
 
-    public static void closePrintSizeAndDeleteExternalMemoryMap(String id, ExternalMemoryMap<?, ?> map){
+    public static void closePrintSizeAndDeleteExternalMemoryMap(String id, ExternalMemoryMap<?, ?> map,
+    		boolean printDeletionInfo){
     	if(map != null){
     		if(!map.isExternalStoreClosed()){
 	    		try{
@@ -198,18 +199,20 @@ public class CommonFunctions {
 	    			logger.log(Level.WARNING, id + ": Failed to close external map", e);
 	    		}
     		}
-    		BigInteger sizeBytes = null;
-    		try{
-    			sizeBytes = map.getSizeOfExternalStore();
-    			if(sizeBytes == null){
-    				logger.log(Level.INFO, id + ": Failed to get size of external map");
-    			}
-    		}catch(Exception e){
-    			logger.log(Level.WARNING, id + ": Failed to get size of external map", e);
-    		}
-    		if(sizeBytes != null){
-    			String displaySize = FileUtils.byteCountToDisplaySize(sizeBytes);
-    			logger.log(Level.INFO, id + ": Size of the external map on disk: {0}", displaySize);
+    		if(printDeletionInfo){
+	    		BigInteger sizeBytes = null;
+	    		try{
+	    			sizeBytes = map.getSizeOfExternalStore();
+	    			if(sizeBytes == null){
+	    				logger.log(Level.INFO, id + ": Failed to get size of external map");
+	    			}
+	    		}catch(Exception e){
+	    			logger.log(Level.WARNING, id + ": Failed to get size of external map", e);
+	    		}
+	    		if(sizeBytes != null){
+	    			String displaySize = FileUtils.byteCountToDisplaySize(sizeBytes);
+	    			logger.log(Level.INFO, id + ": Size of the external map on disk: {0}", displaySize);
+	    		}
     		}
     		try{
     			map.deleteExternalStore();
@@ -330,7 +333,8 @@ public class CommonFunctions {
     public static <X, Y extends Serializable> ExternalMemoryMap<X, Y> createExternalMemoryMapInstance(String id,
     		String cacheSizeValue, String bloomfilterFalsePositiveProbValue, String bloomfilterExpectedElementsCountValue,
     		String parentDBDirPathValue, String dbDirAndNameValue, String reportingIntervalSecondsValue,
-    		String storeClassNameValue, Hasher<X> hasher, boolean appendCurrentMillisToDir, boolean deleteDirIfExists) throws Exception{
+    		String storeClassNameValue, Hasher<X> hasher, boolean appendCurrentMillisToDir, boolean deleteDirIfExists,
+    		boolean printCreationInfo) throws Exception{
 
     	String exceptionPrefix = id + ": ExternalMemoryMap creation: ";
 
@@ -402,12 +406,14 @@ public class CommonFunctions {
     		if(hasher != null){
     			map.setKeyHashFunction(hasher);
     		}
-    		logger.log(Level.INFO, id+": ExternalMemoryMap created with params: cache size={0}, "
-    				+ "db path={1}, db name={2}, false positive prob={3}, expected number of elements={4}, "
-    				+ "reporting interval in millis={5}, external store class name={6}", new Object[]{
-    						cacheSize, dbPath, dbDirAndNameValue, falsePositiveProb, expectedNumberOfElements,
-    						reporterInterval, storeClassNameValue
-    		});
+    		if(printCreationInfo){
+	    		logger.log(Level.INFO, id+": ExternalMemoryMap created with params: cache size={0}, "
+	    				+ "db path={1}, db name={2}, false positive prob={3}, expected number of elements={4}, "
+	    				+ "reporting interval in millis={5}, external store class name={6}", new Object[]{
+	    						cacheSize, dbPath, dbDirAndNameValue, falsePositiveProb, expectedNumberOfElements,
+	    						reporterInterval, storeClassNameValue
+	    		});
+    		}
     		return map;
     	}catch(Throwable e){
     		try{

@@ -71,7 +71,7 @@ public class AuditSanity extends AbstractFilter{
 							public String getHash(AbstractVertex t) {
 								return DigestUtils.sha256Hex(String.valueOf(t));
 							}
-						}, true, false);
+						}, true, false, true);
 				if(vertexMap != null){
 					return true;
 				}else{
@@ -87,7 +87,7 @@ public class AuditSanity extends AbstractFilter{
 	
 	public boolean shutdown(){
 		if(vertexMap != null){
-			CommonFunctions.closePrintSizeAndDeleteExternalMemoryMap(vertexMapId, vertexMap);
+			CommonFunctions.closePrintSizeAndDeleteExternalMemoryMap(vertexMapId, vertexMap, true);
 			vertexMap = null;
 		}
 		return true;

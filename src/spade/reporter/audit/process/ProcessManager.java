@@ -159,7 +159,7 @@ public abstract class ProcessManager extends ProcessStateManager{
 								return t.pid + ":" + t.time;
 							}
 						}
-					}, true, false);
+					}, true, false, true);
 		}
 	}
 	
@@ -241,7 +241,7 @@ public abstract class ProcessManager extends ProcessStateManager{
 	
 	public void doCleanUp(){
 		if(processUnitStates != null){
-			CommonFunctions.closePrintSizeAndDeleteExternalMemoryMap(processUnitStateMapId, processUnitStates);
+			CommonFunctions.closePrintSizeAndDeleteExternalMemoryMap(processUnitStateMapId, processUnitStates, true);
 			processUnitStates = null;
 		}
 	}

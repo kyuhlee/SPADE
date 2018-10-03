@@ -20,7 +20,6 @@
 package spade.reporter.audit.artifact;
 
 import java.math.BigInteger;
-import java.util.AbstractMap.SimpleEntry;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -102,7 +101,7 @@ public class ArtifactManager{
 	private final long IO_SLEEP_WAIT_MS = 50;
 	
 	private boolean reportingTransientMapsStats = false;
-	private Stats globalStats = null, intervalStats = null;
+	private Stats globalStats = null;//, intervalStats = null;
 	
 //	private BigInteger sumUniqueAccessCounts = BigInteger.ZERO;
 //	private BigInteger intervalCount = BigInteger.ZERO;
@@ -176,11 +175,12 @@ public class ArtifactManager{
 				configPersistentCacheSize, configPersistentBloomfilterFalsePositiveProb, 
 				configPersistentBloomfilterExpectedElements, dirPath,
 				configPersistentDbName, configPersistentReportingIntervalSeconds, configPersistentStoreClassName,
-				artifactIdentifierHasher, true, false
+				artifactIdentifierHasher, true, false, true
 		);
 	}
 	
-	private ExternalMemoryMap<ArtifactIdentifier, ArtifactState> initTransientArtifactsMap(String processId) throws Exception{
+	private ExternalMemoryMap<ArtifactIdentifier, ArtifactState> initTransientArtifactsMap(String processId,
+			boolean print) throws Exception{
 		String mapId = getTransientArtifactsMapId(processId);
 		String dbName = getTransientArtifactsMapDbName(processId);
 		String dirPath = getTransientArtifactsMapSubDirPath(processId);
@@ -188,7 +188,7 @@ public class ArtifactManager{
 				configTransientCacheSize, configTransientBloomfilterFalsePositiveProb, 
 				configTransientBloomfilterExpectedElements, dirPath,
 				dbName, configTransientReportingIntervalSeconds, configTransientStoreClassName,
-				artifactIdentifierHasher, false, true
+				artifactIdentifierHasher, false, true, print
 		);
 	}
 	
@@ -342,7 +342,7 @@ public class ArtifactManager{
 		return artifactConfigs.get(identifier.getClass()).canBePermissioned;
 	}
 	
-	private void printTransientStats(boolean force){
+	private void printStats(boolean force){
 		if(reportingTransientMapsStats){
 			if((System.currentTimeMillis() - lastTransientMapsMapReportedMillis > configTransientMapsMapReportingIntervalMillis) ||
 					force){
@@ -350,19 +350,20 @@ public class ArtifactManager{
 //				sumUniqueAccessCounts = sumUniqueAccessCounts.add(
 //						new BigInteger(String.valueOf(globalStats.accessedGroupTransientMaps.size())));
 				
-				Stats diffStats = null;
-				if(intervalStats == null){
-					// First interval
-					diffStats = globalStats;
-				}else{
-					diffStats = Stats.diff(globalStats, intervalStats);
-				}
-				intervalStats = globalStats.copy();
-				logger.log(Level.INFO, "(INTERVAL) Transient maps stats [ {0} ]", 
-						new Object[]{
-								diffStats.toString(), groupIdToMapContainer.size()
-						});
-				logger.log(Level.INFO, "(GLOBAL) Transient maps stats [ {0} ], TotalMaps={1}", 
+//				Stats diffStats = null;
+//				if(intervalStats == null){
+//					// First interval
+//					diffStats = globalStats;
+//				}else{
+//					diffStats = Stats.diff(globalStats, intervalStats);
+//				}
+//				intervalStats = globalStats.copy();
+//				logger.log(Level.INFO, "(INTERVAL) Transient maps stats [ {0} ]", 
+//						new Object[]{
+//								diffStats.toString(), groupIdToMapContainer.size()
+//						});
+				globalStats.uniqueGroupsAccessed = globalStats.accessedGroupTransientMaps.size();
+				logger.log(Level.INFO, "Overall transient maps stats [ {0} ], TotalMaps={1}", 
 						new Object[]{
 								globalStats.toString(), groupIdToMapContainer.size()
 						});
@@ -393,7 +394,7 @@ public class ArtifactManager{
 	 */
 	
 	private ExternalMemoryMap<ArtifactIdentifier, ArtifactState> getResolvedArtifactMap(ArtifactIdentifier identifier){
-		printTransientStats(false);
+		printStats(false);
 		if(identifier instanceof TransientArtifactIdentifier){
 			TransientArtifactIdentifier transientIdentifier = (TransientArtifactIdentifier)(identifier);
 			String processId = transientIdentifier.getGroupId();
@@ -470,13 +471,13 @@ public class ArtifactManager{
 				if(reportingTransientMapsStats){
 					globalStats.incrementOpenRetriesTransientMaps();
 					BigInteger count = null;
-					SimpleEntry<Class<?>, String> exceptionEntry = new SimpleEntry<>(t.getClass(), t.getMessage());
-					if((count = globalStats.transientMapOpenExceptionClassToCount.get(exceptionEntry)) == null){
+					String msg = t.getClass().getName();
+					if((count = globalStats.transientMapOpenExceptionClassToCount.get(msg)) == null){
 						count = BigInteger.ZERO;
 					}else{
 						count = count.add(BigInteger.ONE);
 					}
-					globalStats.transientMapOpenExceptionClassToCount.put(exceptionEntry, count);
+					globalStats.transientMapOpenExceptionClassToCount.put(msg, count);
 				}
 				
 				if(retryCount > maxRetryCount){
@@ -710,7 +711,7 @@ public class ArtifactManager{
 	
 	public void doCleanUp(){
 		if(persistentArtifactsMap != null){
-			CommonFunctions.closePrintSizeAndDeleteExternalMemoryMap(persistentArtifactsMapId, persistentArtifactsMap);
+			CommonFunctions.closePrintSizeAndDeleteExternalMemoryMap(persistentArtifactsMapId, persistentArtifactsMap, true);
 			persistentArtifactsMap = null;
 		}
 		if(groupIdToMapContainer != null){
@@ -721,7 +722,7 @@ public class ArtifactManager{
 			}
 			groupIdToMapContainer.clear();
 		}
-		printTransientStats(true);
+		printStats(true);
 	}
 	
 	/**
@@ -758,7 +759,7 @@ public class ArtifactManager{
 		}
 		private void createOrOpenMap() throws Throwable{
 			if(map == null){
-				map = initTransientArtifactsMap(groupId);
+				map = initTransientArtifactsMap(groupId, false);
 				if(reportingTransientMapsStats){
 					globalStats.incrementCreatedTransientMaps();
 				}
@@ -781,8 +782,13 @@ public class ArtifactManager{
 		}
 		private void deleteMap(){
 			if(map != null){
+				try{
+					globalStats.addToDeletedBytesCount(map.getSizeOfExternalStore());
+				}catch(Throwable t){
+					// ignore
+				}
 				String mapId = getTransientArtifactsMapId(groupId);
-				CommonFunctions.closePrintSizeAndDeleteExternalMemoryMap(mapId, map);
+				CommonFunctions.closePrintSizeAndDeleteExternalMemoryMap(mapId, map, false);
 			}
 		}
 	}
@@ -821,10 +827,13 @@ public class ArtifactManager{
 		 */
 		private BigInteger accessedTransientMaps = BigInteger.ZERO;
 		/**
+		 * Total number of bytes deleted
+		 */
+		private BigInteger deletedBytesCount = BigInteger.ZERO;
+		/**
 		 * Exception class to  number of times that exception occurred with trying to open/create a transient map
 		 */
-		private Map<SimpleEntry<Class<?>, String>, BigInteger> transientMapOpenExceptionClassToCount = 
-				new HashMap<SimpleEntry<Class<?>, String>, BigInteger>();
+		private Map<String, BigInteger> transientMapOpenExceptionClassToCount = new HashMap<String, BigInteger>();
 		/**
 		 * Not to be kept globally - CLEARED AT EACH INTERVAL
 		 * Pids of processes which were referred to
@@ -842,27 +851,34 @@ public class ArtifactManager{
 		private void incrementIndirectlyDeletedTransientMaps(){ indirectlyDeletedTransientMaps = indirectlyDeletedTransientMaps.add(BigInteger.ONE); }
 		private void incrementOpenRetriesTransientMaps(){ openRetriesTransientMaps = openRetriesTransientMaps.add(BigInteger.ONE); }
 		private void incrementAccessedTransientMaps(){ accessedTransientMaps = accessedTransientMaps.add(BigInteger.ONE); }
+		private void addToDeletedBytesCount(BigInteger bytes){ 
+			if(bytes != null){
+				deletedBytesCount = deletedBytesCount.add(bytes);
+			}
+		}
 		
 		public String toString(){
 			return String.format("Reopened=%s, Closed=%s, Created=%s, DirectlyDeleted=%s, IndirectlyDeleted=%s, "
-					+ "OpenRetries=%s, OpenFailExceptionCounts=%s, AccessedOverall=%s, AccessedUnique=%s", 
+					+ "OpenRetries=%s, OpenFailExceptionCounts=%s, AccessedOverall=%s, AccessedUniqueInterval=%s, "
+					+ "DeletedBytes=%s", 
 					reopenedTransientMaps, closedTransientMaps, createdTransientMaps,
 					directlyDeletedTransientMaps, indirectlyDeletedTransientMaps, openRetriesTransientMaps,
-					transientMapOpenExceptionClassToCount, accessedTransientMaps, uniqueGroupsAccessed);
+					transientMapOpenExceptionClassToCount, accessedTransientMaps, uniqueGroupsAccessed, deletedBytesCount);
 		}
 		/**
 		 * @return an exact copy except the 'accessedGroupTransientMaps'
 		 */
 		private Stats copy(){
 			Stats copy = new Stats();
-			copy.reopenedTransientMaps = reopenedTransientMaps;
-			copy.closedTransientMaps = closedTransientMaps;
-			copy.createdTransientMaps = createdTransientMaps;
-			copy.directlyDeletedTransientMaps = directlyDeletedTransientMaps;
-			copy.indirectlyDeletedTransientMaps = indirectlyDeletedTransientMaps;
-			copy.openRetriesTransientMaps = openRetriesTransientMaps;
-			copy.accessedTransientMaps = accessedTransientMaps;
-			copy.transientMapOpenExceptionClassToCount = new HashMap<SimpleEntry<Class<?>, String>, BigInteger>(transientMapOpenExceptionClassToCount);
+			copy.reopenedTransientMaps = this.reopenedTransientMaps;
+			copy.closedTransientMaps = this.closedTransientMaps;
+			copy.createdTransientMaps = this.createdTransientMaps;
+			copy.directlyDeletedTransientMaps = this.directlyDeletedTransientMaps;
+			copy.indirectlyDeletedTransientMaps = this.indirectlyDeletedTransientMaps;
+			copy.openRetriesTransientMaps = this.openRetriesTransientMaps;
+			copy.accessedTransientMaps = this.accessedTransientMaps;
+			copy.deletedBytesCount = this.deletedBytesCount;
+			copy.transientMapOpenExceptionClassToCount = new HashMap<String, BigInteger>(this.transientMapOpenExceptionClassToCount);
 			return copy;
 		}
 		private static Stats diff(Stats minuend, Stats subtrahend){
@@ -874,13 +890,14 @@ public class ArtifactManager{
 			diff.indirectlyDeletedTransientMaps = minuend.indirectlyDeletedTransientMaps.subtract(subtrahend.indirectlyDeletedTransientMaps);
 			diff.openRetriesTransientMaps = minuend.openRetriesTransientMaps.subtract(subtrahend.openRetriesTransientMaps);
 			diff.accessedTransientMaps = minuend.accessedTransientMaps.subtract(subtrahend.accessedTransientMaps);
-			for(SimpleEntry<Class<?>, String> clazzAndMessage : minuend.transientMapOpenExceptionClassToCount.keySet()){
-				BigInteger v2 = minuend.transientMapOpenExceptionClassToCount.get(clazzAndMessage);
-				BigInteger v1 = subtrahend.transientMapOpenExceptionClassToCount.get(clazzAndMessage);
+			diff.deletedBytesCount = minuend.deletedBytesCount.subtract(subtrahend.deletedBytesCount);
+			for(String msg : minuend.transientMapOpenExceptionClassToCount.keySet()){
+				BigInteger v2 = minuend.transientMapOpenExceptionClassToCount.get(msg);
+				BigInteger v1 = subtrahend.transientMapOpenExceptionClassToCount.get(msg);
 				if(v2 == null){ v2 = BigInteger.ZERO; }
 				if(v1 == null){ v1 = BigInteger.ZERO; }
 				BigInteger diffVal = v2.subtract(v1);
-				diff.transientMapOpenExceptionClassToCount.put(clazzAndMessage, diffVal);
+				diff.transientMapOpenExceptionClassToCount.put(msg, diffVal);
 			}
 			diff.uniqueGroupsAccessed = minuend.accessedGroupTransientMaps.size();
 			return diff;
