@@ -2106,8 +2106,8 @@ public class Audit extends AbstractReporter {
 	}
 	
 	private UnknownIdentifier addUnknownFd(String pid, String fd){
-		String threadGroupId = processManager.getGroupIdForTransientArtifact(pid);
-		String threadGroupTime = processManager.getGroupTimeForTransientArtifact(pid);
+		String threadGroupId = processManager.getFdTgid(pid);//getGroupIdForTransientArtifact(pid);
+		String threadGroupTime = processManager.getTimeForPid(threadGroupId);//getGroupTimeForTransientArtifact(pid);
 		UnknownIdentifier unknown = new UnknownIdentifier(threadGroupId, threadGroupTime, fd);
 		unknown.setOpenedForRead(null);
 		artifactManager.artifactCreated(unknown);
@@ -2186,8 +2186,8 @@ public class Audit extends AbstractReporter {
 		}
 		
 		Process process = processManager.handleProcessFromSyscall(eventData);		
-		String threadGroupId = processManager.getGroupIdForTransientArtifact(pid);
-		String threadGroupTime = processManager.getGroupTimeForTransientArtifact(pid);
+		String threadGroupId = processManager.getMemoryTgid(pid);//getGroupIdForTransientArtifact(pid);
+		String threadGroupTime = processManager.getTimeForPid(threadGroupId);//getGroupTimeForTransientArtifact(pid);
 		ArtifactIdentifier memoryArtifactIdentifier = new MemoryIdentifier(threadGroupId, threadGroupTime, address, length);
 		artifactManager.artifactVersioned(memoryArtifactIdentifier);
 		Artifact memoryArtifact = putArtifactFromSyscall(eventData, memoryArtifactIdentifier);
@@ -2240,8 +2240,8 @@ public class Audit extends AbstractReporter {
 		String length = new BigInteger(eventData.get(AuditEventReader.ARG1)).toString(16);
 		String protection = new BigInteger(eventData.get(AuditEventReader.ARG2)).toString(16);
 
-		String threadGroupId = processManager.getGroupIdForTransientArtifact(pid);
-		String threadGroupTime = processManager.getGroupTimeForTransientArtifact(pid);
+		String threadGroupId = processManager.getMemoryTgid(pid);//getGroupIdForTransientArtifact(pid);
+		String threadGroupTime = processManager.getTimeForPid(threadGroupId);//getGroupTimeForTransientArtifact(pid);
 		
 		ArtifactIdentifier memoryIdentifier = new MemoryIdentifier(threadGroupId, threadGroupTime, address, length);
 		artifactManager.artifactVersioned(memoryIdentifier);
@@ -2702,8 +2702,8 @@ public class Audit extends AbstractReporter {
 		if(syscall == SYSCALL.INIT_MODULE){
 			String memoryAddress = new BigInteger(eventData.get(AuditEventReader.ARG0)).toString(16); //convert to hexadecimal
 			String memorySize = new BigInteger(eventData.get(AuditEventReader.ARG1)).toString(16); //convert to hexadecimal
-			String threadGroupId = processManager.getGroupIdForTransientArtifact(pid);
-			String threadGroupTime = processManager.getGroupTimeForTransientArtifact(pid);
+			String threadGroupId = processManager.getMemoryTgid(pid);//getGroupIdForTransientArtifact(pid);
+			String threadGroupTime = processManager.getTimeForPid(threadGroupId);//getGroupTimeForTransientArtifact(pid);
 			moduleIdentifier = new MemoryIdentifier(threadGroupId, threadGroupTime, memoryAddress, memorySize);
 		}else if(syscall == SYSCALL.FINIT_MODULE){
 			String fd = eventData.get(AuditEventReader.ARG0);
@@ -3211,8 +3211,8 @@ public class Audit extends AbstractReporter {
 		String fd1 = eventData.get(AuditEventReader.FD1);
 		String domainString = eventData.get(AuditEventReader.ARG0);
 		String sockTypeString = eventData.get(AuditEventReader.ARG1);
-		String threadGroupId = processManager.getGroupIdForTransientArtifact(pid);
-		String threadGroupTime = processManager.getGroupTimeForTransientArtifact(pid);
+		String threadGroupId = processManager.getFdTgid(pid);//getGroupIdForTransientArtifact(pid);
+		String threadGroupTime = processManager.getTimeForPid(threadGroupId);//getGroupTimeForTransientArtifact(pid);
 		threadGroupId = threadGroupId == null ? pid : threadGroupId;
 		
 		int domain = CommonFunctions.parseInt(domainString, null); // Let exception be thrown
@@ -3244,8 +3244,8 @@ public class Audit extends AbstractReporter {
 		// - FD_PAIR
 		// - EOE
 		String pid = eventData.get(AuditEventReader.PID);
-		String threadGroupId = processManager.getGroupIdForTransientArtifact(pid);
-		String threadGroupTime = processManager.getGroupTimeForTransientArtifact(pid);
+		String threadGroupId = processManager.getFdTgid(pid);//getGroupIdForTransientArtifact(pid);
+		String threadGroupTime = processManager.getTimeForPid(threadGroupId);//getGroupTimeForTransientArtifact(pid);
 		String fd0 = eventData.get(AuditEventReader.FD0);
 		String fd1 = eventData.get(AuditEventReader.FD1);
 		ArtifactIdentifier readPipeIdentifier = new UnnamedPipeIdentifier(threadGroupId, threadGroupTime, fd0, fd1);

@@ -337,6 +337,7 @@ public abstract class ProcessManager extends ProcessStateManager{
 	 * @param pid process id
 	 * @return time value or null if not found
 	 */
+	/*
 	private String getThreadGroupIdStartOrSeenTime(String pid){
 		String threadGroupId = getThreadGroupId(pid);
 		if(threadGroupId != null){
@@ -359,6 +360,7 @@ public abstract class ProcessManager extends ProcessStateManager{
 			return null;
 		}
 	}
+	*/
 	
 	/**
 	 * Gets the thread group id of the pid as decided at the time of clone call.
@@ -366,6 +368,7 @@ public abstract class ProcessManager extends ProcessStateManager{
 	 * @param pid process id
 	 * @return thread group id
 	 */
+	/*
 	private String getThreadGroupId(String pid){
 		ProcessUnitState state = getProcessUnitState(pid);
 		if(state != null){
@@ -374,7 +377,9 @@ public abstract class ProcessManager extends ProcessStateManager{
 			return null;
 		}
 	}
+	*/
 	
+	/*
 	public String getGroupIdForTransientArtifact(String pid){
 		// If pid doesn't have a corresponding group id then return pid because it will be added by the calling syscall
 		String threadGroupId = getThreadGroupId(pid);
@@ -385,7 +390,9 @@ public abstract class ProcessManager extends ProcessStateManager{
 			return pid;
 		}
 	}
+	*/
 	
+	/*
 	public String getGroupTimeForTransientArtifact(String pid){
 		String threadGroupTime = getThreadGroupIdStartOrSeenTime(pid);
 		if(threadGroupTime != null){
@@ -399,6 +406,7 @@ public abstract class ProcessManager extends ProcessStateManager{
 			}
 		}
 	}
+	*/
 		
 	/**
 	 * Returns the process state (which might not be active anymore) by pid and start time.
@@ -756,7 +764,8 @@ public abstract class ProcessManager extends ProcessStateManager{
 			reporter.putEdge(edge, reporter.getOperation(syscall), time, eventId, OPMConstants.SOURCE_AUDIT_SYSCALL);
 		}
 		
-		boolean groupExited = false;
+		String memoryTgid = getMemoryTgid(pid);
+		String fdTgid = getFdTgid(pid);
 		
 		ProcessKey activeKey = null;
 		ProcessUnitState state = null;
@@ -792,7 +801,6 @@ public abstract class ProcessManager extends ProcessStateManager{
 			if(activeKey != null){
 				processUnitStates.remove(activeKey);
 			}
-			groupExited = true;
 		}else if(syscall == SYSCALL.EXIT){
 			if(threadGroupsKeys != null){
 				threadGroupsKeys.remove(null);
@@ -808,7 +816,6 @@ public abstract class ProcessManager extends ProcessStateManager{
 				if(activeKey != null){
 					processUnitStates.remove(activeKey);
 				}
-				groupExited = activeProcesses.get(threadGroupId) == null;
 			}else{
 				removeProcessUnitState(pid);
 			}
@@ -816,10 +823,12 @@ public abstract class ProcessManager extends ProcessStateManager{
 			reporter.log(Level.WARNING, "Unexpected syscall in exit handler", null, time, eventId, syscall);
 		}
 		
-		if(groupExited){
-			if(threadGroupId != null){
-				artifactManager.doCleanUpForPid(threadGroupId);
-			}
+		if(activeProcesses.get(memoryTgid) == null){
+			artifactManager.doCleanUpForPid(memoryTgid);
+		}
+		
+		if(activeProcesses.get(fdTgid) == null){
+			artifactManager.doCleanUpForPid(fdTgid);
 		}
 		
 		return true;
@@ -955,6 +964,15 @@ public abstract class ProcessManager extends ProcessStateManager{
 		return false;
 	}
 	
+	public String getTimeForPid(String pid){
+		ProcessKey key = null;
+		if((key = activeProcesses.get(pid)) != null){
+			return key.time;
+		}else{
+			return null;
+		}
+	}
+	
 	/*  PROCFS code below */
 	
 	public void putProcessesFromProcFs(){
@@ -1038,8 +1056,8 @@ public abstract class ProcessManager extends ProcessStateManager{
 								if(inodefd0.get(inode) == null){
 									inodefd0.put(inode, fdString);
 								}else{
-									String threadGroupId = getThreadGroupId(pid);
-									String threadGroupTime = getThreadGroupIdStartOrSeenTime(pid);
+									String threadGroupId = getFdTgid(pid);//getThreadGroupId(pid);
+									String threadGroupTime = getTimeForPid(threadGroupId);//getThreadGroupIdStartOrSeenTime(pid);
 									ArtifactIdentifier pipeInfo = new UnnamedPipeIdentifier(threadGroupId, threadGroupTime, fdString, inodefd0.get(inode));
 									fds.put(fdString, pipeInfo);
 									fds.put(inodefd0.get(inode), pipeInfo);
