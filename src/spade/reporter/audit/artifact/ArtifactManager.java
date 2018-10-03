@@ -20,6 +20,7 @@
 package spade.reporter.audit.artifact;
 
 import java.math.BigInteger;
+import java.util.AbstractMap.SimpleEntry;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -468,13 +469,14 @@ public class ArtifactManager{
 				// Failed to open
 				if(reportingTransientMapsStats){
 					globalStats.incrementOpenRetriesTransientMaps();
-					BigInteger transientMapOpenExceptionClassCount = null;
-					if((transientMapOpenExceptionClassCount = globalStats.transientMapOpenExceptionClassToCount.get(t.getClass())) == null){
-						transientMapOpenExceptionClassCount = BigInteger.ZERO;
+					BigInteger count = null;
+					SimpleEntry<Class<?>, String> exceptionEntry = new SimpleEntry<>(t.getClass(), t.getMessage());
+					if((count = globalStats.transientMapOpenExceptionClassToCount.get(exceptionEntry)) == null){
+						count = BigInteger.ZERO;
 					}else{
-						transientMapOpenExceptionClassCount = transientMapOpenExceptionClassCount.add(BigInteger.ONE);
+						count = count.add(BigInteger.ONE);
 					}
-					globalStats.transientMapOpenExceptionClassToCount.put(t.getClass(), transientMapOpenExceptionClassCount);
+					globalStats.transientMapOpenExceptionClassToCount.put(exceptionEntry, count);
 				}
 				
 				if(retryCount > maxRetryCount){
@@ -821,7 +823,8 @@ public class ArtifactManager{
 		/**
 		 * Exception class to  number of times that exception occurred with trying to open/create a transient map
 		 */
-		private Map<Class<?>, BigInteger> transientMapOpenExceptionClassToCount = new HashMap<Class<?>, BigInteger>();
+		private Map<SimpleEntry<Class<?>, String>, BigInteger> transientMapOpenExceptionClassToCount = 
+				new HashMap<SimpleEntry<Class<?>, String>, BigInteger>();
 		/**
 		 * Not to be kept globally - CLEARED AT EACH INTERVAL
 		 * Pids of processes which were referred to
@@ -859,7 +862,7 @@ public class ArtifactManager{
 			copy.indirectlyDeletedTransientMaps = indirectlyDeletedTransientMaps;
 			copy.openRetriesTransientMaps = openRetriesTransientMaps;
 			copy.accessedTransientMaps = accessedTransientMaps;
-			copy.transientMapOpenExceptionClassToCount = new HashMap<Class<?>, BigInteger>(transientMapOpenExceptionClassToCount);
+			copy.transientMapOpenExceptionClassToCount = new HashMap<SimpleEntry<Class<?>, String>, BigInteger>(transientMapOpenExceptionClassToCount);
 			return copy;
 		}
 		private static Stats diff(Stats minuend, Stats subtrahend){
@@ -871,13 +874,13 @@ public class ArtifactManager{
 			diff.indirectlyDeletedTransientMaps = minuend.indirectlyDeletedTransientMaps.subtract(subtrahend.indirectlyDeletedTransientMaps);
 			diff.openRetriesTransientMaps = minuend.openRetriesTransientMaps.subtract(subtrahend.openRetriesTransientMaps);
 			diff.accessedTransientMaps = minuend.accessedTransientMaps.subtract(subtrahend.accessedTransientMaps);
-			for(Class<?> clazz : minuend.transientMapOpenExceptionClassToCount.keySet()){
-				BigInteger v2 = minuend.transientMapOpenExceptionClassToCount.get(clazz);
-				BigInteger v1 = subtrahend.transientMapOpenExceptionClassToCount.get(clazz);
+			for(SimpleEntry<Class<?>, String> clazzAndMessage : minuend.transientMapOpenExceptionClassToCount.keySet()){
+				BigInteger v2 = minuend.transientMapOpenExceptionClassToCount.get(clazzAndMessage);
+				BigInteger v1 = subtrahend.transientMapOpenExceptionClassToCount.get(clazzAndMessage);
 				if(v2 == null){ v2 = BigInteger.ZERO; }
 				if(v1 == null){ v1 = BigInteger.ZERO; }
 				BigInteger diffVal = v2.subtract(v1);
-				diff.transientMapOpenExceptionClassToCount.put(clazz, diffVal);
+				diff.transientMapOpenExceptionClassToCount.put(clazzAndMessage, diffVal);
 			}
 			diff.uniqueGroupsAccessed = minuend.accessedGroupTransientMaps.size();
 			return diff;
