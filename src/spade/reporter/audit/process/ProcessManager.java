@@ -129,6 +129,8 @@ public abstract class ProcessManager extends ProcessStateManager{
 	 */
 	private final boolean units;
 	
+	public final boolean debug;
+	
 	protected ProcessManager(Audit reporter, boolean simplify, boolean units) throws Exception{
 		this.reporter = reporter;
 		this.simplify = simplify;
@@ -145,6 +147,12 @@ public abstract class ProcessManager extends ProcessStateManager{
 		if(configMap == null){
 			throw new Exception("NULL config map read from file: " + configFilePath);
 		}else{
+			if("true".equals(configMap.get("debug"))){
+				debug = true;
+			}else{
+				debug = false;
+			}
+			
 			processUnitStates = CommonFunctions.createExternalMemoryMapInstance(processUnitStateMapId, 
 					configMap.get("cacheSize"), configMap.get("falsePositiveProb"), 
 					configMap.get("expectedElements"), configMap.get("dbParentDir"), 
@@ -966,11 +974,17 @@ public abstract class ProcessManager extends ProcessStateManager{
 	
 	public String getTimeForPid(String pid){
 		ProcessKey key = null;
+		String time = null;
 		if((key = activeProcesses.get(pid)) != null){
-			return key.time;
-		}else{
-			return null;
+			time = key.time;
 		}
+		if(debug){
+			if(time == null){
+				Exception e = new Exception("NULL time for pid: " + pid);
+				logger.log(Level.WARNING, null, e);
+			}
+		}
+		return time;
 	}
 	
 	/*  PROCFS code below */

@@ -2185,11 +2185,13 @@ public class Audit extends AbstractReporter {
 			return;
 		}
 		
-		Process process = processManager.handleProcessFromSyscall(eventData);		
 		String threadGroupId = processManager.getMemoryTgid(pid);//getGroupIdForTransientArtifact(pid);
 		String threadGroupTime = processManager.getTimeForPid(threadGroupId);//getGroupTimeForTransientArtifact(pid);
+		
 		ArtifactIdentifier memoryArtifactIdentifier = new MemoryIdentifier(threadGroupId, threadGroupTime, address, length);
 		artifactManager.artifactVersioned(memoryArtifactIdentifier);
+		
+		Process process = processManager.handleProcessFromSyscall(eventData);	
 		Artifact memoryArtifact = putArtifactFromSyscall(eventData, memoryArtifactIdentifier);
 		WasGeneratedBy wgbEdge = new WasGeneratedBy(memoryArtifact, process);
 		wgbEdge.addAnnotation(OPMConstants.EDGE_PROTECTION, protection);
@@ -3829,11 +3831,11 @@ public class Audit extends AbstractReporter {
 			}
 		}
 		
-		Process process = processManager.handleProcessFromSyscall(eventData);
-		
 		if(identifier == null){
 			identifier = addUnknownFd(pid, fd);
 		}
+		
+		Process process = processManager.handleProcessFromSyscall(eventData);
 		
 		if(isNetworkUdp){
 			// Since saddr present that means that it is SOCK_DGRAM.
