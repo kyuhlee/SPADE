@@ -19,7 +19,7 @@
  */
 package spade.filter;
 
-import java.io.File;
+import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -31,6 +31,7 @@ import spade.core.AbstractVertex;
 import spade.core.Settings;
 import spade.utility.CommonFunctions;
 import spade.utility.ExternalMemoryMap;
+import spade.utility.FileUtility;
 import spade.utility.Hasher;
 
 /**
@@ -46,25 +47,47 @@ public class AuditSanity extends AbstractFilter{
 	private final String vertexMapId = "AuditSanity[VertexMap]";
 	
 	public boolean initialize(String arguments){
+		String configFilePath = Settings.getDefaultConfigFilePath(this.getClass());
+		Map<String, String> configMap = null;
 		try{
-			vertexMap = CommonFunctions.createExternalMemoryMapInstance(vertexMapId, "100000", "0.0001", "10000000", 
-					Settings.getProperty("spade_root") + File.separator + "tmp", "vertexhashes", "120", 
-					new Hasher<AbstractVertex>(){
-						@Override
-						public String getHash(AbstractVertex t) {
-							return DigestUtils.sha256Hex(String.valueOf(t));
-						}
-					});
-			return true;
-		}catch(Exception e){
-			logger.log(Level.SEVERE, "Failed to create external map", e);
+			configMap = FileUtility.readConfigFileAsKeyValueMap(configFilePath, "=");
+		}catch(Throwable t){
+			logger.log(Level.SEVERE, "Failed to read config file: " + configFilePath, t);
 			return false;
+		}
+		
+		if(configMap == null){
+			logger.log(Level.SEVERE, "NULL config map read from file: " + configFilePath);
+			return false;
+		}else{
+			try{
+				vertexMap = CommonFunctions.createExternalMemoryMapInstance(vertexMapId, 
+						configMap.get("cacheSize"), configMap.get("falsePositiveProb"), 
+						configMap.get("expectedElements"), configMap.get("dbParentDir"), 
+						configMap.get("dbName"), configMap.get("reportingIntervalSeconds"), 
+						configMap.get("dbStoreClassName"),
+						new Hasher<AbstractVertex>(){
+							@Override
+							public String getHash(AbstractVertex t) {
+								return DigestUtils.sha256Hex(String.valueOf(t));
+							}
+						}, true, false, true);
+				if(vertexMap != null){
+					return true;
+				}else{
+					logger.log(Level.SEVERE, "Silently failed to initialize external map");
+					return false;
+				}
+			}catch(Exception e){
+				logger.log(Level.SEVERE, "Failed to create external map", e);
+				return false;
+			}
 		}
 	}
 	
 	public boolean shutdown(){
 		if(vertexMap != null){
-			CommonFunctions.closePrintSizeAndDeleteExternalMemoryMap(vertexMapId, vertexMap);
+			CommonFunctions.closePrintSizeAndDeleteExternalMemoryMap(vertexMapId, vertexMap, true);
 			vertexMap = null;
 		}
 		return true;

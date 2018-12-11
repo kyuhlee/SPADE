@@ -183,7 +183,7 @@ public class HostInfo{
 			String command = "lshw -C system";
 			try{
 				Execute.Output output = Execute.getOutput(command);
-				if(output.exitValueIndicatesError()){
+				if(output.hasError()){
 					output.log();
 					return null;
 				}else{
@@ -211,14 +211,26 @@ public class HostInfo{
 		 */
 		private static String readSerialNumberFromDbusFile(){
 			String filepath = "/var/lib/dbus/machine-id";
-			if(FileUtility.fileExists(filepath)){
-				List<String> lines = FileUtility.readLines(filepath);
-				if(lines != null && !lines.isEmpty()){
-					return lines.get(0);
+			try{
+				if(FileUtility.isFileReadable(filepath)){
+					try{
+						List<String> lines = FileUtility.readLines(filepath);
+						if(lines == null || lines.isEmpty()){
+							logger.log(Level.SEVERE, "NULL/Empty lines in file: " + filepath);
+							return null;
+						}else{
+							return lines.get(0);
+						}
+					}catch(Exception e){
+						logger.log(Level.SEVERE, "Failed to read file: " + filepath, e);
+						return null;
+					}
 				}else{
+					logger.log(Level.SEVERE, "File is not readable: " + filepath);
 					return null;
 				}
-			}else{
+			}catch(Exception e){
+				logger.log(Level.SEVERE, "Failed to check if file is readable: " + filepath, e);
 				return null;
 			}
 		}
@@ -232,7 +244,7 @@ public class HostInfo{
 			 String command = "uname -a";
 			 try{
 				 Execute.Output output = Execute.getOutput(command);
-				 if(output.exitValueIndicatesError()){
+				 if(output.hasError()){
 					 output.log();
 				 }else{
 					 List<String> stdOutLines = output.getStdOut();
@@ -455,7 +467,7 @@ public class HostInfo{
 			try{
 				Execute.Output output = Execute.getOutput("auditctl -m " + auditRecordMsg);
 				output.log();
-				if(!output.exitValueIndicatesError()){
+				if(!output.hasError()){
 					return true;
 				}
 			}catch(Exception e){
@@ -510,6 +522,8 @@ public class HostInfo{
 	 * A class which contains all the Host information required at the moment.
 	 */
 	public static class Host implements VertexIdentifier{
+		
+		private static final long serialVersionUID = -5990891430891823447L;
 		// Everything initialized to empty values to avoid NPE
 		private String serialNumber = "", hostType = "", hostName = "", operationSystem = "";
 		private List<Interface> interfaces = new ArrayList<Interface>();

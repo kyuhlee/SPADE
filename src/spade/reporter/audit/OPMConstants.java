@@ -82,10 +82,12 @@ public class OPMConstants {
 			ARTIFACT_REMOTE_PORT = "remote port",
 			ARTIFACT_EPOCH = "epoch",
 			ARTIFACT_FD = "fd",
+			ARTIFACT_FD0 = "fd 0",
+			ARTIFACT_FD1 = "fd 1",
 			ARTIFACT_MEMORY_ADDRESS = "memory address",
 			ARTIFACT_PATH = "path",
 			ARTIFACT_PERMISSIONS = "permissions", 
-			ARTIFACT_PID = PROCESS_PID,
+			//ARTIFACT_PID = PROCESS_PID,
 			ARTIFACT_PROTOCOL = "protocol",
 			ARTIFACT_READ_FD = "read fd",
 			ARTIFACT_SIZE = "size",
@@ -93,6 +95,8 @@ public class OPMConstants {
 			ARTIFACT_LOCAL_PORT = "local port",
 			ARTIFACT_SUBTYPE = "subtype",
 			ARTIFACT_TGID = "tgid",
+			ARTIFACT_TIME = "time",
+			ARTIFACT_PID = "pid",
 			ARTIFACT_VERSION = "version",
 			ARTIFACT_WRITE_FD = "write fd",
 			ARTIFACT_HOST_TYPE = "host type",
@@ -117,6 +121,8 @@ public class OPMConstants {
 			SUBTYPE_UNIX_SOCKET = "unix socket",
 			SUBTYPE_UNKNOWN = "unknown",
 			SUBTYPE_UNNAMED_PIPE = "unnamed pipe",
+			SUBTYPE_UNNAMED_UNIX_SOCKET_PAIR = "unnamed unix socket pair",
+			SUBTYPE_UNNAMED_NETWORK_SOCKET_PAIR = "unnamed network socket pair",
 			
 			// General edge annotations
 			EDGE_EVENT_ID = "event id",
@@ -192,7 +198,7 @@ public class OPMConstants {
 		addSyscallsToOperations(OPERATION_LINK, SYSCALL.LINK, SYSCALL.LINKAT, SYSCALL.SYMLINK, SYSCALL.SYMLINKAT);
 		addSyscallsToOperations(OPERATION_LOAD, SYSCALL.LOAD);
 		addSyscallsToOperations(OPERATION_MKNOD, SYSCALL.MKNOD, SYSCALL.MKNODAT);
-		addSyscallsToOperations(OPERATION_MMAP, SYSCALL.MMAP, SYSCALL.MMAP2);
+		addSyscallsToOperations(OPERATION_MMAP, SYSCALL.MMAP);
 		addSyscallsToOperations(OPERATION_MPROTECT, SYSCALL.MPROTECT);
 		addSyscallsToOperations(OPERATION_OPEN, SYSCALL.OPEN, SYSCALL.OPENAT);
 		addSyscallsToOperations(OPERATION_PIPE, SYSCALL.PIPE, SYSCALL.PIPE2);
@@ -452,6 +458,4 @@ public class OPMConstants {
 			return null;
 		}
 	}
-	
-	
 }

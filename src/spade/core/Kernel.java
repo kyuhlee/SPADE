@@ -78,9 +78,11 @@ public class Kernel
 		System.setProperty("java.util.logging.SimpleFormatter.format", "%1$tb %1$td, %1$tY %1$tl:%1$tM:%1$tS %1$Tp %2$s %4$s: %5$s%6$s%n");
 	}
 
-    private static final String SPADE_ROOT = Settings.getProperty("spade_root");
+    public static final String SPADE_ROOT = Settings.getProperty("spade_root");
+
     public static final String FILE_SEPARATOR = String.valueOf(File.separatorChar);
 
+    public static final String DB_ROOT = SPADE_ROOT + "db" + FILE_SEPARATOR;
     /**
      * Path to log files including the prefix.
      */
@@ -94,7 +96,7 @@ public class Kernel
      * Path to configuration file for storing state of SPADE instance (includes
      * currently added modules).
      */
-    private static final String CONFIG_FILE = CONFIG_PATH + FILE_SEPARATOR + "spade.config";
+    private static final String CONFIG_FILE = CONFIG_PATH + FILE_SEPARATOR + "spade.client.Control.config";
     /**
      * Paths to key stores.
      */
@@ -122,7 +124,21 @@ public class Kernel
     /**
      * Set of storages active on the local SPADE instance.
      */
-    public static Set<AbstractStorage> storages;
+    public static Set<AbstractStorage>storages;
+
+    public static AbstractStorage getStorage(String storageName)
+    {
+        for(AbstractStorage storage : storages)
+        {
+            // Search for the given storage in the storages set.
+            if(storage.getClass().getSimpleName().equalsIgnoreCase(storageName))
+            {
+                return storage;
+            }
+        }
+
+        return null;
+    }
     /**
      * Set of filters active on the local SPADE instance.
      */
@@ -303,7 +319,6 @@ public class Kernel
         sslContext.init(kmf.getKeyManagers(), tmf.getTrustManagers(), secureRandom);
         sslServerSocketFactory = sslContext.getServerSocketFactory();
     }
-
 
     public static void addServerSocket(ServerSocket socket)
     {
@@ -701,7 +716,6 @@ public class Kernel
         string.append("\t" + ADD_REPORTER_STORAGE_STRING + "\n");
         string.append("\t" + ADD_ANALYZER_SKETCH_STRING + "\n");
         string.append("\t" + ADD_FILTER_TRANSFORMER_STRING + "\n");
-        string.append("\t" + ADD_ANALYZER_SKETCH_STRING + "\n");
         string.append("\t" + REMOVE_REPORTER_STORAGE_SKETCH_ANALYZER_STRING + "\n");
         string.append("\t" + REMOVE_FILTER_TRANSFORMER_STRING + "\n");
         string.append("\t" + LIST_STRING + "\n");
@@ -761,7 +775,7 @@ public class Kernel
     public static void addCommand(String line, PrintStream outputStream)
     {
         String[] tokens = line.split("\\s+", 4);
-        if (tokens.length < 2)
+        if (tokens.length < 3)
         {
             outputStream.println("Usage:");
             outputStream.println("\t" + ADD_REPORTER_STORAGE_STRING);
@@ -770,7 +784,7 @@ public class Kernel
             return;
         }
         String moduleName = tokens[1].toLowerCase();
-        String className = tokens.length >= 3 ? tokens[2] : null;
+        String className = tokens[2];
         String arguments = null;
         String position = null;
         SimpleEntry<String, String> positionArgumentsEntry;
@@ -779,12 +793,6 @@ public class Kernel
         switch (moduleName)
         {
             case "reporter":
-                if (tokens.length < 3)
-                {
-                    outputStream.println("Usage:");
-                    outputStream.println("\t" + ADD_REPORTER_STORAGE_STRING);
-                    return;
-                }
                 arguments = (tokens.length == 3) ? null : tokens[3];
                 logger.log(Level.INFO, "Adding reporter: {0}", className);
                 outputStream.print("Adding reporter " + className + "... ");
@@ -822,12 +830,6 @@ public class Kernel
                 break;
 
             case "analyzer":
-                if (tokens.length < 3)
-                {
-                    outputStream.println("Usage:");
-                    outputStream.println("\t" + ADD_ANALYZER_SKETCH_STRING);
-                    return;
-                }
                 logger.log(Level.INFO, "Adding analyzer: {0}", className);
                 outputStream.print("Adding analyzer " + className + "... ");
                 AbstractAnalyzer analyzer;
@@ -853,12 +855,6 @@ public class Kernel
                 break;
 
             case "storage":
-                if (tokens.length < 3)
-                {
-                    outputStream.println("Usage:");
-                    outputStream.println("\t" + ADD_REPORTER_STORAGE_STRING);
-                    return;
-                }
                 arguments = (tokens.length == 3) ? null : tokens[3];
                 logger.log(Level.INFO, "Adding storage: {0}", className);
                 outputStream.print("Adding storage " + className + "... ");
@@ -867,26 +863,40 @@ public class Kernel
                 {
                     storage = (AbstractStorage) Class.forName("spade.storage." + className).newInstance();
                 }
-                catch (ClassNotFoundException | InstantiationException | IllegalAccessException ex)
+                catch (Exception ex)
                 {
-                    outputStream.println("error: Unable to find/load class");
+                    outputStream.println("Unable to find/load class");
                     logger.log(Level.SEVERE, null, ex);
                     return;
                 }
-                if (storage.initialize(arguments))
+                catch(Error er)
                 {
-                    // The initialize() method must return true to indicate
-                    // successful startup.
-                    storage.arguments = arguments;
-                    storage.vertexCount = 0;
-                    storage.edgeCount = 0;
-                    storages.add(storage);
-                    AbstractQuery.setCurrentStorage(storage);
-                    logger.log(Level.INFO, "Storage added: {0}", className + " " + arguments);
-                    outputStream.println("done");
+                    outputStream.println("Unable to find/load class");
+                    logger.log(Level.SEVERE, "Unable to find/load class", er);
+                    return;
                 }
-                else
+                try
                 {
+                    if(storage.initialize(arguments))
+                    {
+                        // The initialize() method must return true to indicate
+                        // successful startup.
+                        storage.arguments = arguments;
+                        storage.vertexCount = 0;
+                        storage.edgeCount = 0;
+                        storages.add(storage);
+                        logger.log(Level.INFO, "Storage added: {0}", className + " " + arguments);
+                        logger.log(Level.INFO, "currentStorage set to "+ storage.getClass().getName());
+                        outputStream.println("done");
+                    }
+                    else
+                    {
+                        outputStream.println("failed");
+                    }
+                }
+                catch(Exception | Error ex)
+                {
+                    logger.log(Level.SEVERE, "Unable to initialize storage!", ex);
                     outputStream.println("failed");
                 }
 
@@ -973,7 +983,8 @@ public class Kernel
                 try
                 {
                     index = Integer.parseInt(position) - 1;
-                } catch (NumberFormatException numberFormatException)
+                }
+                catch (NumberFormatException numberFormatException)
                 {
                     outputStream.println("error: Position must be specified and must be a number");
                     return;
@@ -1018,12 +1029,6 @@ public class Kernel
                 break;
 
             case "sketch":
-                if (tokens.length < 3)
-                {
-                    outputStream.println("Usage:");
-                    outputStream.println("\t" + ADD_ANALYZER_SKETCH_STRING);
-                    return;
-                }
                 logger.log(Level.INFO, "Adding sketch: {0}", className);
                 outputStream.print("Adding sketch " + className + "... ");
 
@@ -1315,29 +1320,49 @@ public class Kernel
                     for (Iterator<AbstractStorage> storageIterator = storages.iterator(); storageIterator.hasNext();)
                     {
                         AbstractStorage storage = storageIterator.next();
-                        // Search for the given storage in the storages set.
-                        if (storage.getClass().getSimpleName().equals(className))
-                        {
-                            // Mark the storage for removal by adding it to the removeStorages set.
-                            // This will enable the main SPADE thread to safely commit any transactions
-                            // and then remove the storage.
-                            long vertexCount = storage.vertexCount;
-                            long edgeCount = storage.edgeCount;
-                            removeStorages.add(storage);
-                            found = true;
-                            logger.log(Level.INFO, "Shutting down storage: {0}", className);
-                            outputStream.print("Shutting down storage " + className + "... ");
-
-                            while (removeStorages.contains(storage))
-                            {
-                                // Wait for other thread to safely remove storage
-                                Thread.sleep(REMOVE_WAIT_DELAY);
-                            }
-                            storageIterator.remove();
-                            logger.log(Level.INFO, "Storage shut down: {0} ({1} vertices and {2} edges were added)",
-                                    new Object[]{className, vertexCount, edgeCount});
-                            outputStream.println("done (" + vertexCount + " vertices and " + edgeCount + " edges added)");
-                            break;
+                        if(storage != null){
+	                        // Search for the given storage in the storages set.
+	                        if (storage.getClass().getSimpleName().equals(className))
+	                        {
+	                            boolean updateCurrentStorage = false;
+	                            if(storage.equals(AbstractQuery.getCurrentStorage()))
+	                            {
+	                                updateCurrentStorage = true;
+	                            }
+	                            // Mark the storage for removal by adding it to the removeStorages set.
+	                            // This will enable the main SPADE thread to safely commit any transactions
+	                            // and then remove the storage.
+	                            long vertexCount = storage.vertexCount;
+	                            long edgeCount = storage.edgeCount;
+	                            removeStorages.add(storage);
+	                            found = true;
+	                            logger.log(Level.INFO, "Shutting down storage: {0}", className);
+	                            outputStream.print("Shutting down storage " + className + "... ");
+	
+	                            while (removeStorages.contains(storage))
+	                            {
+	                                // Wait for other thread to safely remove storage
+	                                Thread.sleep(REMOVE_WAIT_DELAY);
+	                            }
+	                            storageIterator.remove();
+	                            if(updateCurrentStorage)
+	                            {
+	                                if(storageIterator.hasNext())
+	                                {
+	                                    AbstractStorage nextStorage = storageIterator.next();
+	                                    AbstractQuery.setCurrentStorage(nextStorage);
+	                                    logger.log(Level.INFO, "currentStorage updated to " + nextStorage.getClass().getName());
+	                                }
+	                                else
+	                                {
+	                                    AbstractQuery.setCurrentStorage(null);
+	                                }
+	                            }
+	                            logger.log(Level.INFO, "Storage shut down: {0} ({1} vertices and {2} edges were added)",
+	                                    new Object[]{className, vertexCount, edgeCount});
+	                            outputStream.println("done (" + vertexCount + " vertices and " + edgeCount + " edges added)");
+	                            break;
+	                        }
                         }
                     }
                     if (!found)
@@ -1491,6 +1516,11 @@ public class Kernel
         for (AbstractStorage storage : storages)
         {
             storage.shutdown();
+        }
+        // Shut down analzers.
+        for(AbstractAnalyzer analyzer: analyzers)
+        {
+            analyzer.shutdown();
         }
 
         // Shut down server sockets.

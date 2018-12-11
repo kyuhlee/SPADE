@@ -48,52 +48,94 @@ public class BerkeleyDB<V extends Serializable> implements ExternalStore<V> {
 	private Database database;
 	
 	private String directoryPath;
+	private String databaseName;
 	
-	public BerkeleyDB(String directoryPath, String databaseName) throws Exception{
+	private boolean isClosed = false;
+	
+	protected BerkeleyDB(String directoryPath, String databaseName) throws Exception{
 		this.directoryPath = directoryPath;
+		this.databaseName = databaseName;
 		
-		EnvironmentConfig envConfig = new EnvironmentConfig();
-		envConfig.setAllowCreate(true);
-		environment = new Environment(new File(directoryPath), envConfig);
+		environment = new Environment(new File(directoryPath), getDefaultEnvironmentConfig());
+		database = environment.openDatabase(null, databaseName, getDefaultDatabaseConfig());
 		
-		DatabaseConfig dbConfig = new DatabaseConfig();
-		dbConfig.setAllowCreate(true);
-		database = environment.openDatabase(null, databaseName, dbConfig);
+		if(environment == null || database == null){
+			throw new Exception("Silently failed to initialize DB");
+		}
 	}
 
+	private DatabaseConfig getDefaultDatabaseConfig(){
+		DatabaseConfig dbConfig = new DatabaseConfig();
+		dbConfig.setAllowCreate(true);
+		return dbConfig;
+	}
+	
+	private EnvironmentConfig getDefaultEnvironmentConfig(){
+		EnvironmentConfig envConfig = new EnvironmentConfig();
+		envConfig.setAllowCreate(true);
+		return envConfig;
+	}
+	
+	private String getDBPrintableString(){
+		return "["+databaseName+"("+directoryPath+")]";
+	}
+	
+	private String getDBClosedErrorMessage(){
+		return "DB "+getDBPrintableString()+" is closed";
+	}
+	
 	@Override
 	public V get(String key) throws Exception {
-		DatabaseEntry keyEntry = new DatabaseEntry(key.getBytes());
-		DatabaseEntry valueEntry = new DatabaseEntry();
-		
-	    if(database.get(null, keyEntry, valueEntry, LockMode.DEFAULT) == OperationStatus.SUCCESS){
-	        byte[] valueBytes = valueEntry.getData();
-	        ByteArrayInputStream byteInputStream = new ByteArrayInputStream(valueBytes);
-			ObjectInputStream objectInputStream = new ObjectInputStream(byteInputStream);
-			return (V)objectInputStream.readObject();
-	    }else{
-	        return null;
-	    }
+		if(isClosed){
+			throw new Exception(getDBClosedErrorMessage());
+		}else{
+			if(key != null){
+				DatabaseEntry keyEntry = new DatabaseEntry(key.getBytes());
+				DatabaseEntry valueEntry = new DatabaseEntry();
+				
+			    if(database.get(null, keyEntry, valueEntry, LockMode.DEFAULT) == OperationStatus.SUCCESS){
+			        byte[] valueBytes = valueEntry.getData();
+			        ByteArrayInputStream byteInputStream = new ByteArrayInputStream(valueBytes);
+					ObjectInputStream objectInputStream = new ObjectInputStream(byteInputStream);
+					return (V)objectInputStream.readObject();
+			    }else{
+			        return null;
+			    }
+			}else{
+				return null;
+			}
+		}
 	}
 
 	@Override
 	public void put(String key, V value) throws Exception {
-		
-		ByteArrayOutputStream byteOutputStream = new ByteArrayOutputStream();
-		ObjectOutputStream objectOutputStream = new ObjectOutputStream(byteOutputStream);
-		objectOutputStream.writeObject(value);
-		objectOutputStream.flush();
-		byte[] valueBytes = byteOutputStream.toByteArray(); 
-		
-		DatabaseEntry keyEntry = new DatabaseEntry(key.getBytes());
-		DatabaseEntry valueEntry = new DatabaseEntry(valueBytes);
-		database.put(null, keyEntry, valueEntry);
+		if(isClosed){
+			throw new Exception(getDBClosedErrorMessage());
+		}else{
+			if(key != null && value != null){
+				ByteArrayOutputStream byteOutputStream = new ByteArrayOutputStream();
+				ObjectOutputStream objectOutputStream = new ObjectOutputStream(byteOutputStream);
+				objectOutputStream.writeObject(value);
+				objectOutputStream.flush();
+				byte[] valueBytes = byteOutputStream.toByteArray(); 
+				
+				DatabaseEntry keyEntry = new DatabaseEntry(key.getBytes());
+				DatabaseEntry valueEntry = new DatabaseEntry(valueBytes);
+				database.put(null, keyEntry, valueEntry);
+			}
+		}
 	}
 
 	@Override
 	public void remove(String key) throws Exception {
-	    DatabaseEntry keyEntry = new DatabaseEntry(key.getBytes());
-	    database.delete(null, keyEntry);
+		if(isClosed){
+			throw new Exception(getDBClosedErrorMessage());
+		}else{
+			if(key != null){
+			    DatabaseEntry keyEntry = new DatabaseEntry(key.getBytes());
+			    database.delete(null, keyEntry);
+			}
+		}
 	}
 
 	/**
@@ -105,23 +147,70 @@ public class BerkeleyDB<V extends Serializable> implements ExternalStore<V> {
 	}
 	
 	@Override
+	public void reopen() throws Exception{
+		if(!isClosed){
+			throw new Exception("DB "+getDBPrintableString()+" is already open");
+		}else{
+			environment = new Environment(new File(directoryPath), getDefaultEnvironmentConfig());
+			database = environment.openDatabase(null, databaseName, getDefaultDatabaseConfig());
+			
+			if(environment == null || database == null){
+				throw new Exception("Silently failed to reopen DB");
+			}
+			isClosed = false;
+		}
+	}
+	
+	@Override
+	public boolean isClosed(){
+		return isClosed;
+	}
+	
+	@Override
 	public void close() throws Exception{
-		database.close();
-		environment.close();
+		if(isClosed){
+			throw new Exception(getDBClosedErrorMessage());
+		}else{
+			isClosed = true;
+			if(database != null){
+				database.close();
+				database = null;
+			}
+			if(environment != null){
+				environment.close();
+				environment = null;
+			}
+		}
 	}
 	
 	@Override
 	public void delete() throws Exception{
-		if(FileUtility.fileExists(this.directoryPath)){
-			FileUtility.deleteFile(this.directoryPath);
+		if(directoryPath != null){
+			try{
+				if(FileUtility.doesPathExist(directoryPath)){
+					if(!FileUtility.deleteDirectory(directoryPath)){
+						throw new Exception();
+					}
+				}
+			}catch(Exception e){
+				throw new Exception(e.getMessage() + ". Path deletion failed: " + directoryPath, e);
+			}
 		}
 	}
 	
 	public BigInteger sizeInBytesOfPersistedData() throws Exception{
-		if(FileUtility.fileExists(directoryPath)){
-			return FileUtility.getDirectorySizeInBytes(directoryPath);
+		if(directoryPath != null){
+			try{
+				if(FileUtility.doesPathExist(directoryPath)){
+					return FileUtility.getSizeInBytes(directoryPath);
+				}else{
+					throw new Exception("Does not exist");
+				}
+			}catch(Exception e){
+				throw new Exception(e.getMessage() + ". Failed to get size for path: " + directoryPath, e);
+			}
 		}else{
-			throw new Exception("No directory found at path: " + directoryPath);
+			return BigInteger.ZERO;
 		}
 	}
 

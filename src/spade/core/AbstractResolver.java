@@ -1,22 +1,23 @@
+/*
+ --------------------------------------------------------------------------------
+ SPADE - Support for Provenance Auditing in Distributed Environments.
+ Copyright (C) 2017 SRI International
+ This program is free software: you can redistribute it and/or
+ modify it under the terms of the GNU General Public License as
+ published by the Free Software Foundation, either version 3 of the
+ License, or (at your option) any later version.
+ This program is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ General Public License for more details.
+ You should have received a copy of the GNU General Public License
+ along with this program. If not, see <http://www.gnu.org/licenses/>.
+ --------------------------------------------------------------------------------
+ */
 package spade.core;
 
-import org.apache.commons.collections.CollectionUtils;
-import spade.reporter.audit.OPMConstants;
-
-import javax.net.ssl.SSLSocket;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.ObjectInputStream;
-import java.io.OutputStream;
-import java.io.PrintWriter;
 import java.util.HashSet;
 import java.util.Set;
-import java.util.logging.Level;
-import java.util.logging.Logger;
-
-import static spade.core.AbstractQuery.DEFAULT_MAX_LIMIT;
-import static spade.core.AbstractQuery.OPERATORS;
-import static spade.core.AbstractStorage.PRIMARY_KEY;
 
 /**
  * @author raza
@@ -35,12 +36,12 @@ public abstract class AbstractResolver implements Runnable
     protected String direction;
     protected String function;
 
-    protected AbstractResolver(Graph pgraph, String func, int d, String dir)
+    protected AbstractResolver(Graph partialGraph, String function, int depth, String direction)
     {
-        partialGraph = pgraph;
-        depth = d;
-        direction = dir;
-        function = func;
+        this.partialGraph = partialGraph;
+        this.function = function;
+        this.depth = depth;
+        this.direction = direction;
     }
 
     public Set<Graph> getFinalGraph()
@@ -50,91 +51,5 @@ public abstract class AbstractResolver implements Runnable
 
     @Override
     public abstract void run();
-
-    /**
-     * Method used to get remote lineage of a network vertex.
-     *
-     * @param networkVertex The input network vertex.
-     * @param depth Depth of lineage.
-     * @param direction Direction of lineage.
-     * @return The result represented by a Graph object.
-     */
-    protected static Graph queryNetworkVertex(AbstractVertex networkVertex, int depth, String direction)
-    {
-        Graph resultGraph = null;
-        try
-        {
-            // Establish a connection to the remote host
-            String host = networkVertex.getAnnotation(OPMConstants.ARTIFACT_REMOTE_ADDRESS);
-            int port = Integer.parseInt(Settings.getProperty("dig_query_port"));
-            SSLSocket remoteSocket = (SSLSocket) Kernel.sslSocketFactory.createSocket(host, port);
-
-            OutputStream outStream = remoteSocket.getOutputStream();
-            InputStream inStream = remoteSocket.getInputStream();
-            ObjectInputStream graphInputStream = new ObjectInputStream(inStream);
-            PrintWriter remoteSocketOut = new PrintWriter(outStream, true);
-
-            String networkVertexQuery = "GetVertex(" +
-                    OPMConstants.ARTIFACT_LOCAL_ADDRESS +
-                    OPERATORS.EQUALS +
-                    networkVertex.getAnnotation(OPMConstants.ARTIFACT_REMOTE_ADDRESS) +
-                    " AND " +
-                    OPMConstants.ARTIFACT_LOCAL_PORT +
-                    OPERATORS.EQUALS +
-                    networkVertex.getAnnotation(OPMConstants.ARTIFACT_REMOTE_PORT) +
-                    " AND " +
-                    OPMConstants.ARTIFACT_REMOTE_ADDRESS +
-                    OPERATORS.EQUALS +
-                    networkVertex.getAnnotation(OPMConstants.ARTIFACT_LOCAL_ADDRESS) +
-                    " AND " +
-                    OPMConstants.ARTIFACT_REMOTE_PORT +
-                    OPERATORS.EQUALS +
-                    networkVertex.getAnnotation(OPMConstants.ARTIFACT_LOCAL_PORT) +
-                    " AND " +
-                    OPMConstants.SOURCE +
-                    OPERATORS.EQUALS +
-                    OPMConstants.SOURCE_AUDIT_NETFILTER +
-                    ", null" +
-                    ")";
-
-            remoteSocketOut.println(networkVertexQuery);
-            // Check whether the remote query server returned a vertex set in response
-            Set<AbstractVertex> vertexSet = (Set<AbstractVertex>) graphInputStream.readObject();
-            AbstractVertex targetVertex;
-            if(!CollectionUtils.isEmpty(vertexSet))
-                targetVertex = vertexSet.iterator().next();
-            else
-                return null;
-            String targetVertexHash = targetVertex.getAnnotation(PRIMARY_KEY);
-
-            String lineageQuery = "GetLineage(" +
-                    PRIMARY_KEY +
-                    OPERATORS.EQUALS +
-                    targetVertexHash +
-                    ", " +
-                    DEFAULT_MAX_LIMIT +
-                    ", " +
-                    depth +
-                    ", " +
-                    direction +
-                    ")";
-            remoteSocketOut.println(lineageQuery);
-            resultGraph = (Graph) graphInputStream.readObject();
-
-            remoteSocketOut.println("exit");
-            remoteSocketOut.close();
-            graphInputStream.close();
-            inStream.close();
-            outStream.close();
-            remoteSocket.close();
-        }
-        catch (NumberFormatException | IOException | ClassNotFoundException exception)
-        {
-            Logger.getLogger(AbstractResolver.class.getName()).log(Level.SEVERE, "Remote resolution unsuccessful!", exception);
-            return null;
-        }
-
-        return resultGraph;
-    }
 }
 

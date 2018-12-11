@@ -155,7 +155,6 @@ public class ExternalMemoryMap<K, V extends Serializable>{
 				if(printStats){
 					databaseInsertionsInterval++;
 				}
-				
 			}catch(Exception e){
 				logger.log(Level.WARNING, mapId + ": Failed to update cache element in cachestore", e);
 			}
@@ -224,7 +223,7 @@ public class ExternalMemoryMap<K, V extends Serializable>{
 			int inMemoryMapSize = leastRecentlyUsedCache != null ? leastRecentlyUsedCache.size() : 0;
 			
 			logger.log(Level.INFO, mapId + ": Total map accesses = {0}, Interval map accesses = {1}, "
-					+ "Total bloomfilter false positives = {2}, Interval bloomfilter false positives = {3}, "
+					+ "Total Bloom filter false positives = {2}, Interval Bloom filter false positives = {3}, "
 					+ "Total LRU cache hits = {4}, Interval LRU cache hits = {5}, "
 					+ "Total LRU cache misses = {6}, Interval LRU cache misses = {7}, "
 					+ "Total successful database hits = {8}, Interval successful database hits = {9}, "
@@ -260,60 +259,64 @@ public class ExternalMemoryMap<K, V extends Serializable>{
 	 * @return Value paired against the provided key. Null if doesn't exist
 	 */
 	public V get(Object key) {
-		
-		if(printStats){
-			printStats();
-			mapAccessesInterval++;
-		}
-		
-		try{
-			K k = (K)key;
-			if(bloomFilter.contains(k)){ //bloomfilter contains the key
-				if(leastRecentlyUsedCache.get(k) != null){ //exists in cache
-					
-					if(printStats){
-						lruCacheHitsInterval++;
-					}
-					
-					Node<K, V> node = leastRecentlyUsedCache.get(k); //get from cache
-					Node.makeNodeHead(node, head); //make this node the head
-					return node.value; //return the value
-				}else{ //doesn't exist in cache
-					
-					if(printStats){
-						lruCacheMissesInterval++;
-					}
-					
-					String hash = keyHasher.getHash(k);
-					V value = cacheStore.get(hash); //get from db
-					if(value == null){ //if not in DB
+		if(!cacheStore.isClosed()){
+			if(printStats){
+				printStats();
+				mapAccessesInterval++;
+			}
+			
+			try{
+				K k = (K)key;
+				if(bloomFilter.contains(k)){ //bloomfilter contains the key
+					if(leastRecentlyUsedCache.get(k) != null){ //exists in cache
 						
 						if(printStats){
-							bloomfilterFalsePositivesInterval++;
-							failedDatabaseHitsInterval++;
+							lruCacheHitsInterval++;
 						}
 						
-						return null; //was false positive
-					}else{ //if in DB
-						
-						if(printStats){
-							successfulDatabaseHitsInterval++;
-						}
-						
-						evictLeastRecentlyUsed(); //if need be
-						
-						Node<K, V> node = new Node<>(k, value);
+						Node<K, V> node = leastRecentlyUsedCache.get(k); //get from cache
 						Node.makeNodeHead(node, head); //make this node the head
+						return node.value; //return the value
+					}else{ //doesn't exist in cache
 						
-						leastRecentlyUsedCache.put(k, node); //put in cache
-						return value;
+						if(printStats){
+							lruCacheMissesInterval++;
+						}
+						
+						String hash = keyHasher.getHash(k);
+						V value = cacheStore.get(hash); //get from db
+						if(value == null){ //if not in DB
+							
+							if(printStats){
+								bloomfilterFalsePositivesInterval++;
+								failedDatabaseHitsInterval++;
+							}
+							
+							return null; //was false positive
+						}else{ //if in DB
+							
+							if(printStats){
+								successfulDatabaseHitsInterval++;
+							}
+							
+							evictLeastRecentlyUsed(); //if need be
+							
+							Node<K, V> node = new Node<>(k, value);
+							Node.makeNodeHead(node, head); //make this node the head
+							
+							leastRecentlyUsedCache.put(k, node); //put in cache
+							return value;
+						}
 					}
+				}else{ //not in bloomfilter so not anywhere since no false negative
+					return null;
 				}
-			}else{ //not in bloomfilter so not anywhere since no false negative
+			}catch(Exception e){
+				logger.log(Level.SEVERE, mapId + ": Failed to get value for key: " + key, e);
 				return null;
 			}
-		}catch(Exception e){
-			logger.log(Level.SEVERE, mapId + ": Failed to get value for key: " + key, e);
+		}else{
+			logger.log(Level.SEVERE, mapId + ": External store closed.");
 			return null;
 		}
 	}
@@ -331,30 +334,35 @@ public class ExternalMemoryMap<K, V extends Serializable>{
 	 * @return Inserted object
 	 */	
 	public V put(K key, V value) {
-		if(printStats){
-			printStats();
-		}
-		try{
-			bloomFilter.add(key);
-			Node<K, V> node = leastRecentlyUsedCache.get(key);
-//			String hash = keyHasher.getHash((K)key);
-			if(node == null){ //if not in cache
-				
-				evictLeastRecentlyUsed(); //if need be
-				
-				node = new Node<K, V>(key, value); //create the node
-				leastRecentlyUsedCache.put(key, node); //put in cache
-				//cacheStore.put(hash, value); //no need to put in db. will be put in when evicted
-			}else{ //if node exists in cache
-				if(!node.value.equals(value)){ //i.e. new value for the same key. so, update.
-					node.value = value;
-//					cacheStore.put(hash, value); //no need to put in db. will be put in when evicted
-				}
+		if(!cacheStore.isClosed()){
+			if(printStats){
+				printStats();
 			}
-			Node.makeNodeHead(node, head);
-			return value;
-		}catch(Exception e){
-			logger.log(Level.SEVERE, mapId + ": Failed to put " + value + " for " + key, e);
+			try{
+				bloomFilter.add(key);
+				Node<K, V> node = leastRecentlyUsedCache.get(key);
+	//			String hash = keyHasher.getHash((K)key);
+				if(node == null){ //if not in cache
+					
+					evictLeastRecentlyUsed(); //if need be
+					
+					node = new Node<K, V>(key, value); //create the node
+					leastRecentlyUsedCache.put(key, node); //put in cache
+					//cacheStore.put(hash, value); //no need to put in db. will be put in when evicted
+				}else{ //if node exists in cache
+					if(!node.value.equals(value)){ //i.e. new value for the same key. so, update.
+						node.value = value;
+	//					cacheStore.put(hash, value); //no need to put in db. will be put in when evicted
+					}
+				}
+				Node.makeNodeHead(node, head);
+				return value;
+			}catch(Exception e){
+				logger.log(Level.SEVERE, mapId + ": Failed to put " + value + " for " + key, e);
+				return null;
+			}
+		}else{
+			logger.log(Level.SEVERE, mapId + ": External store closed.");
 			return null;
 		}
 	}
@@ -371,60 +379,96 @@ public class ExternalMemoryMap<K, V extends Serializable>{
 	 * 
 	 */
 	public V remove(Object key) {
-		try{
-			K k = (K)key;
-			String hash = keyHasher.getHash(k);
-			if(bloomFilter.contains(k)){
-				V value = null;
-				if(leastRecentlyUsedCache.get(k) != null){
-					Node<K, V> node = leastRecentlyUsedCache.get(k);
-					Node.removeNode(node);
-					value = node.value;
+		if(!cacheStore.isClosed()){
+			try{
+				K k = (K)key;
+				String hash = keyHasher.getHash(k);
+				if(bloomFilter.contains(k)){
+					V value = null;
+					if(leastRecentlyUsedCache.get(k) != null){
+						Node<K, V> node = leastRecentlyUsedCache.get(k);
+						Node.removeNode(node);
+						value = node.value;
+					}else{
+						value = cacheStore.get(hash); //get from DB
+					}
+					leastRecentlyUsedCache.remove(key);
+					//remove value from DB
+					cacheStore.remove(hash);
+					return value;
 				}else{
-					value = cacheStore.get(hash); //get from DB
+					return null;
 				}
-				leastRecentlyUsedCache.remove(key);
-				//remove value from DB
-				cacheStore.remove(hash);
-				return value;
-			}else{
+			}catch(Exception e){
+				logger.log(Level.SEVERE, mapId + ": Failed to remove key: " + key, e);
 				return null;
 			}
-		}catch(Exception e){
-			logger.log(Level.SEVERE, mapId + ": Failed to remove key: " + key, e);
+		}else{
+			logger.log(Level.SEVERE, mapId + ": External store closed.");
 			return null;
 		}
 	}
 	
-	/**
-	 * Removes all key-value pairing from the bloomfilter, in-memory map and the external storage
+	/*
+	 * Create (constructor), close, open, delete
+	 * 
+	 * no clear
 	 */
-	public void clear() {
-		leastRecentlyUsedCache.clear();
-		bloomFilter.clear();
-		try{
-			cacheStore.clear();
-		}catch(Exception e){
-			logger.log(Level.SEVERE, mapId + ": Failed to clear map", e);
-		}
-		head = new Node<K, V>(null, null);
-		tail = new Node<K, V>(null, null);
-	}
 	
-	/**
-	 * A function to close the external store being used
-	 */
-	public void close(){
+	private void flushToExternalStore(){
 		try{
-			if(cacheStore != null){
-				cacheStore.close();
+			for(Map.Entry<K, Node<K,V>> entry : leastRecentlyUsedCache.entrySet()){
+				K key = entry.getKey();
+				Node<K, V> node = entry.getValue();
+				if(key != null && node != null){
+					K nodeKey = node.key;
+					V value = node.value;
+					if(nodeKey != null && value != null){
+						try{
+							cacheStore.put(keyHasher.getHash(nodeKey), value);
+						}catch(Throwable t){
+							logger.log(Level.SEVERE, mapId + ": Failed to flush element [key="+nodeKey+", value="+value+"]", t);
+						}
+					}
+				}
 			}
-		}catch(Exception e){
-			logger.log(Level.SEVERE, mapId + ": Failed to close cache store", e);
+		}catch(Throwable t){
+			logger.log(Level.SEVERE, mapId + ": Failed to flush to external store", t);
 		}
 	}
 	
-	public BigInteger getSizeOfPersistedDataInBytes() throws Exception{
+	public void reopenExternalStore() throws Throwable{
+		cacheStore.reopen();
+	}
+	
+	public boolean isExternalStoreClosed(){
+		return cacheStore.isClosed();
+	}
+	
+	public void close(boolean flush){
+		if(!cacheStore.isClosed()){
+			if(flush){
+				flushToExternalStore();
+			}
+			try{
+				if(cacheStore != null){
+					cacheStore.close();
+					// Don't do the following if close fails
+					leastRecentlyUsedCache.clear();
+					head = new Node<K, V>(null, null);
+					tail = new Node<K, V>(null, null);
+					head.next = tail;
+					tail.previous = head;
+				}
+			}catch(Exception e){
+				logger.log(Level.SEVERE, mapId + ": Failed to close cache store", e);
+			}
+		}else{
+			logger.log(Level.SEVERE, mapId + ": External store closed.");
+		}
+	}
+	
+	public BigInteger getSizeOfExternalStore() throws Exception{
 		if(cacheStore != null){
 			return cacheStore.sizeInBytesOfPersistedData();
 		}else{
@@ -435,7 +479,7 @@ public class ExternalMemoryMap<K, V extends Serializable>{
 	/**
 	 * Calls delete on the underlying external db
 	 */
-	public void delete(){
+	public void deleteExternalStore(){
 		try{
 			if(cacheStore != null){
 				cacheStore.delete();
@@ -444,6 +488,7 @@ public class ExternalMemoryMap<K, V extends Serializable>{
 			logger.log(Level.SEVERE, mapId + ": Failed to delete cache store", e);
 		}
 	}
+	
 }
 
 /**

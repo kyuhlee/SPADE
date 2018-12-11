@@ -1,3 +1,19 @@
+/*
+ --------------------------------------------------------------------------------
+ SPADE - Support for Provenance Auditing in Distributed Environments.
+ Copyright (C) 2017 SRI International
+ This program is free software: you can redistribute it and/or
+ modify it under the terms of the GNU General Public License as
+ published by the Free Software Foundation, either version 3 of the
+ License, or (at your option) any later version.
+ This program is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ General Public License for more details.
+ You should have received a copy of the GNU General Public License
+ along with this program. If not, see <http://www.gnu.org/licenses/>.
+ --------------------------------------------------------------------------------
+ */
 package spade.core;
 
 import java.util.ArrayList;
@@ -12,18 +28,14 @@ import java.util.logging.Logger;
 public abstract class AbstractQuery<R, P>
 {
     // indices of variables in parameter map of GetVertex and GetEdge
-    protected static final int ARITHMETIC_OPERATOR = 0;
-    protected static final int COL_VALUE = 1;
+    protected static final int COMPARISON_OPERATOR = 0;
+    public static final int COL_VALUE = 1;
     protected static final int BOOLEAN_OPERATOR = 2;
 
     protected static final Integer DEFAULT_MIN_LIMIT = 1;
     protected static final Integer DEFAULT_MAX_LIMIT = 100;
 
-    public static final boolean USE_SCAFFOLD = true;
-
     protected static AbstractStorage currentStorage;
-    protected static final String DIRECTION_ANCESTORS = Settings.getProperty("direction_ancestors");
-    protected static final String DIRECTION_DESCENDANTS = Settings.getProperty("direction_descendants");
 
     public interface OPERATORS
     {
@@ -42,6 +54,11 @@ public abstract class AbstractQuery<R, P>
     public static void setCurrentStorage(AbstractStorage storage)
     {
         currentStorage = storage;
+    }
+
+    public static AbstractStorage getCurrentStorage()
+    {
+        return currentStorage;
     }
 
     public void register()

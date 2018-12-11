@@ -20,7 +20,7 @@
 http://www-01.ibm.com/support/knowledgecenter/ssw_i5_54/rzab6/xconoclient.htm
 --------------------------------------------------------------------------------
 	*/
-
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <string.h>
 #include <sys/types.h>
@@ -197,6 +197,7 @@ event_buf_t *event_buf;
 bool incomplete_record = false;
 
 void syscall_handler(char *buf);
+int get_max_pid();
 
 /*
 			Java does not support reading from Unix domain sockets.

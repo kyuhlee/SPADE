@@ -20,19 +20,20 @@
 package spade.core;
 
 import org.apache.lucene.analysis.Analyzer;
-import org.apache.lucene.analysis.KeywordAnalyzer;
+import org.apache.lucene.analysis.core.KeywordAnalyzer;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
+import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
-import org.apache.lucene.queryParser.ParseException;
-import org.apache.lucene.queryParser.QueryParser;
+import org.apache.lucene.queryparser.classic.ParseException;
+import org.apache.lucene.queryparser.classic.QueryParser;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.RAMDirectory;
-import org.apache.lucene.util.Version;
+
 import spade.edge.opm.Used;
 import spade.edge.opm.WasControlledBy;
 import spade.edge.opm.WasDerivedFrom;
@@ -55,10 +56,8 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-import java.util.Queue;
 import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -78,13 +77,12 @@ public class Graph extends AbstractStorage implements Serializable
     private static final int MAX_QUERY_HITS = 1000;
     private static final String SRC_VERTEX_ID = "SRC_VERTEX_ID";
     private static final String DST_VERTEX_ID = "DST_VERTEX_ID";
-    private static final String ID_STRING = Settings.getProperty("storage_identifier");
 
     private static final Pattern nodePattern = Pattern.compile("\"(.*)\" \\[label=\"(.*)\" shape=\"(\\w*)\" fillcolor=\"(\\w*)\"", Pattern.DOTALL);
     private static final Pattern edgePattern = Pattern.compile("\"(.*)\" -> \"(.*)\" \\[label=\"(.*)\" color=\"(\\w*)\"", Pattern.DOTALL);
 
     private transient Analyzer analyzer = new KeywordAnalyzer();
-    private transient QueryParser queryParser = new QueryParser(Version.LUCENE_35, null, analyzer);
+    private transient QueryParser queryParser = new QueryParser(null, analyzer);
     private Set<AbstractVertex> vertexSet = new LinkedHashSet<>();
     private Map<String, AbstractVertex> vertexIdentifiers = new HashMap<>();
     private Map<AbstractVertex, String> reverseVertexIdentifiers = new HashMap<>();
@@ -104,12 +102,19 @@ public class Graph extends AbstractStorage implements Serializable
     private transient IndexWriter edgeIndexWriter;
 
     /**
-     * Fields for Consistency check
+     * Fields for discrepancy check and query params
      */
     private String hostName;
     private String computeTime;
     private int maxDepth;
     private AbstractVertex rootVertex;
+
+    public AbstractVertex getDestinationVertex()
+    {
+        return destinationVertex;
+    }
+
+    private AbstractVertex destinationVertex;
     private String signature;
     
     public void mergeThreads() {
@@ -124,8 +129,8 @@ public class Graph extends AbstractStorage implements Serializable
         try {
             vertexIndex = new RAMDirectory();
             edgeIndex = new RAMDirectory();
-            vertexIndexWriter = new IndexWriter(vertexIndex, new IndexWriterConfig(Version.LUCENE_35, analyzer));
-            edgeIndexWriter = new IndexWriter(edgeIndex, new IndexWriterConfig(Version.LUCENE_35, analyzer));
+            vertexIndexWriter = new IndexWriter(vertexIndex, new IndexWriterConfig(analyzer));
+            edgeIndexWriter = new IndexWriter(edgeIndex, new IndexWriterConfig(analyzer));
             queryParser.setAllowLeadingWildcard(true);
         } catch (Exception exception) {
             logger.log(Level.SEVERE, null, exception);
@@ -178,8 +183,8 @@ public class Graph extends AbstractStorage implements Serializable
                 String value = currentEntry.getValue();
                 doc.add(new Field(key, value, Field.Store.YES, Field.Index.ANALYZED));
             }
-            doc.add(new Field(ID_STRING, Integer.toString(serial_number), Field.Store.YES, Field.Index.ANALYZED));
-            vertexIndexWriter.addDocument(doc);
+            doc.add(new Field(PRIMARY_KEY, Integer.toString(serial_number), Field.Store.YES, Field.Index.ANALYZED));
+            // vertexIndexWriter.addDocument(doc);
             // vertexIndexWriter.commit();
 
             String hashCode = incomingVertex.bigHashCode();
@@ -223,16 +228,13 @@ public class Graph extends AbstractStorage implements Serializable
             {
                 String key = currentEntry.getKey();
                 String value = currentEntry.getValue();
-                if (key.equals(ID_STRING)) {
-                    continue;
-                }
                 doc.add(new Field(key, value, Field.Store.YES, Field.Index.ANALYZED));
             }
-            doc.add(new Field(ID_STRING, Integer.toString(serial_number), Field.Store.YES, Field.Index.ANALYZED));
+            doc.add(new Field(PRIMARY_KEY, Integer.toString(serial_number), Field.Store.YES, Field.Index.ANALYZED));
             doc.add(new Field(SRC_VERTEX_ID, reverseVertexIdentifiers.get(incomingEdge.getChildVertex()), Field.Store.YES, Field.Index.ANALYZED));
             doc.add(new Field(DST_VERTEX_ID, reverseVertexIdentifiers.get(incomingEdge.getParentVertex()), Field.Store.YES, Field.Index.ANALYZED));
-            edgeIndexWriter.addDocument(doc);
-            // edgeIndexWriter.commit();
+//            edgeIndexWriter.addDocument(doc);
+//            edgeIndexWriter.commit();
 
             String hashCode = incomingEdge.getChildVertex().bigHashCode() + incomingEdge.getParentVertex().bigHashCode();
             edgeIdentifiers.put(hashCode, incomingEdge);
@@ -385,7 +387,8 @@ public class Graph extends AbstractStorage implements Serializable
      * @param graph2 Input graph 2
      * @return The result graph
      */
-    public static Graph union(Graph graph1, Graph graph2) {
+    public static Graph union(Graph graph1, Graph graph2)
+    {
         Graph resultGraph = new Graph();
         Set<AbstractVertex> vertices = new HashSet<>();
         Set<AbstractEdge> edges = new HashSet<>();
@@ -395,14 +398,21 @@ public class Graph extends AbstractStorage implements Serializable
         edges.addAll(graph1.edgeSet());
         edges.addAll(graph2.edgeSet());
 
-        for (AbstractVertex vertex : vertices) {
+        for (AbstractVertex vertex : vertices)
+        {
             resultGraph.putVertex(vertex);
         }
-        for (AbstractEdge edge : edges) {
+        for (AbstractEdge edge : edges)
+        {
             resultGraph.putEdge(edge);
         }
 
+        // adding network maps
+        resultGraph.networkMap.putAll(graph1.networkMap());
+        resultGraph.networkMap.putAll(graph2.networkMap());
+
         resultGraph.commitIndex();
+
         return resultGraph;
     }
 
@@ -433,6 +443,12 @@ public class Graph extends AbstractStorage implements Serializable
 
         resultGraph.commitIndex();
         return resultGraph;
+    }
+
+    public void remove(Graph graph)
+    {
+        vertexSet.removeAll(graph.vertexSet());
+        edgeSet.removeAll(graph.edgeSet());
     }
 
     public static Graph importGraph(String path) {
@@ -701,17 +717,16 @@ public class Graph extends AbstractStorage implements Serializable
     public List<Integer> listVertices(String expression) {
         try {
             List<Integer> results = new ArrayList<>();
-            IndexReader reader = IndexReader.open(vertexIndex);
+            IndexReader reader = DirectoryReader.open(vertexIndex);
             IndexSearcher searcher = new IndexSearcher(reader);
             ScoreDoc[] hits = searcher.search(queryParser.parse(expression), MAX_QUERY_HITS).scoreDocs;
 
             for (int i = 0; i < hits.length; ++i) {
                 int docId = hits[i].doc;
                 Document foundDoc = searcher.doc(docId);
-                results.add(Integer.parseInt(foundDoc.get(ID_STRING)));
+                results.add(Integer.parseInt(foundDoc.get(PRIMARY_KEY)));
             }
 
-            searcher.close();
             reader.close();
             return results;
         } catch (IOException | ParseException | NumberFormatException exception) {
